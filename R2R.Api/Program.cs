@@ -1,11 +1,15 @@
 using System.Text.RegularExpressions;
 
-// Bootstraps the minimal API host and exposes basic OpenAPI metadata.
+// Bootstraps the minimal API host and exposes Swagger for interactive testing.
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
-app.MapOpenApi(); // Exposes OpenAPI JSON at /openapi/v1.json (requires Microsoft.AspNetCore.OpenApi).
+
+// Enable Swagger UI
+app.UseSwagger();
+app.UseSwaggerUI();
 
 // Ephemeral store backing the API; data is lost once the process stops.
 var db = new InMemoryDb();
