@@ -1,0 +1,6 @@
+@R2R.Api_HostAddress = http://localhost:5258
+
+GET {{R2R.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
