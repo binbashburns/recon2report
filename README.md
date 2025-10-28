@@ -1,4 +1,5 @@
-# recon2report
+# recon2report ⓡ②ⓡ
+![img1](./assets/r2r-logo.png)
 Better pentesting, from recon to reporting.
 
 ## Overview
@@ -21,14 +22,13 @@ Everything runs in-memory (no persistence yet) so it is ideal for quick lab-styl
    dotnet run --project R2R.Api
    ```
    The default launch profile listens on `http://localhost:5258` and exposes OpenAPI JSON at `/openapi/v1.json`.
-3. (Optional) Export a different base URL if you change the API port:
-   ```bash
-   export R2R_API_BASE=http://localhost:5000/
-   ```
-4. Launch the CLI in a separate terminal:
+
+   ![img2](/assets/step-1.png)
+3. Launch the CLI in a separate terminal:
    ```bash
    dotnet run --project R2R.Cli
    ```
+   ![img3](/assets/step-2.png)
 
 ## Typical Workflow
 1. When prompted, name the session and provide the target IP/OS.

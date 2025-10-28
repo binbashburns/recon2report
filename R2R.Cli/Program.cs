@@ -4,7 +4,7 @@
 var baseUrl = Environment.GetEnvironmentVariable("R2R_API_BASE") ?? "http://localhost:5258/";
 var api = new HttpClient { BaseAddress = new Uri(baseUrl) };
 
-Console.WriteLine("R2R — Recon to Report (Phase 1: CLI)");
+Console.WriteLine("R2R — Recon2Report (CLI)");
 Console.Write("Name this session: ");
 var name = Console.ReadLine() ?? "Lab";
 
@@ -69,7 +69,7 @@ if ((Console.ReadLine() ?? "").Trim().ToLower() == "y") {
     Console.WriteLine(del.IsSuccessStatusCode ? "Deleted." : "Delete failed.");
 }
 
-Console.WriteLine("\nDone. (Phase 1 complete — no persistence, no reports.)");
+Console.WriteLine("\nDone");
 
 // Local DTOs (mirror API)
 record Session(string Id, string Name);

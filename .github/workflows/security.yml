@@ -66,7 +66,7 @@ jobs:
         id: vuln
         run: |
           dotnet list package --vulnerable --include-transitive | tee vuln-report.txt
-          if grep -q "No vulnerable packages found." vuln-report.txt; then
+          if grep -q "has no vulnerable packages" vuln-report.txt; then
             echo "status=clean" >> "$GITHUB_OUTPUT"
           else
             echo "status=issues" >> "$GITHUB_OUTPUT"
