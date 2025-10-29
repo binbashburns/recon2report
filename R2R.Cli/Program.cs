@@ -19,7 +19,14 @@ Console.Write("OS (Windows/Linux): ");
 var os = Console.ReadLine() ?? "Linux";
 
 var tgtResp = await api.PostAsJsonAsync("targets", new { Id = "", SessionId = session.Id, Ip = ip, Os = os });
-tgtResp.EnsureSuccessStatusCode();
+if (!tgtResp.IsSuccessStatusCode)
+{
+    var error = await tgtResp.Content.ReadAsStringAsync();
+    Console.ForegroundColor = ConsoleColor.Red;
+    Console.WriteLine($"Error creating target: {error}");
+    Console.ResetColor();
+    return;
+}
 var target = await tgtResp.Content.ReadFromJsonAsync<Target>();
 Console.WriteLine($"Target: {target!.Id} {target.Ip} ({target.Os})");
 
