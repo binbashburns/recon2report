@@ -151,15 +151,24 @@ while (true) {
 }
 var paste = string.Join("\n", buf);
 
-// Send the pasted scan results to the parsing helper.
-var parseResp = await api.PostAsJsonAsync("nmap/parse", new { NmapOutput = paste });
-var ports = await parseResp.Content.ReadFromJsonAsync<List<OpenPort>>();
-Console.WriteLine($"\nOpen ports detected: {ports!.Count}");
-foreach (var p in ports) Console.WriteLine($"- {p.Protocol}/{p.Number} {p.Service} {p.Version}");
+// Send the pasted scan results to be saved with the target
+var uploadResp = await api.PostAsJsonAsync($"targets/{target.Id}/scan", new { NmapOutput = paste });
+if (!uploadResp.IsSuccessStatusCode)
+{
+    Console.ForegroundColor = ConsoleColor.Red;
+    Console.WriteLine("Error uploading scan results.");
+    Console.ResetColor();
+    return;
+}
+
+var scanResult = await uploadResp.Content.ReadFromJsonAsync<ScanUploadResult>();
+Console.WriteLine($"\nOpen ports detected: {scanResult!.PortsDetected}");
+
+foreach (var p in scanResult.Ports) Console.WriteLine($"- {p.Protocol}/{p.Number} {p.Service} {p.Version}");
 
 // Ask the API for the generalized follow-up checklist.
 Console.WriteLine("\nNext steps (generalized):");
-var nextResp = await api.PostAsJsonAsync("next-steps", new { Ip = target.Ip, Os = target.Os, Ports = ports });
+var nextResp = await api.PostAsJsonAsync("next-steps", new { Ip = target.Ip, Os = target.Os, Ports = scanResult.Ports });
 var tips = await nextResp.Content.ReadFromJsonAsync<List<Suggestion>>();
 foreach (var t in tips!) Console.WriteLine($"[{t.Area}] {t.Tip}");
 
@@ -187,3 +196,4 @@ record Target(string Id, string SessionId, string Ip, string Os);
 record OpenPort(int Number, string Protocol, string? Service, string? Version);
 record NmapCommand(string Title, string Command, string Explanation);
 record Suggestion(string Area, string Tip);
+record ScanUploadResult(string TargetId, int PortsDetected, List<OpenPort> Ports);

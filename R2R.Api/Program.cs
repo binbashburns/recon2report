@@ -59,6 +59,23 @@ app.MapPut("/targets/{id}", (string id, Target t) =>
 // Clean up a target when it is no longer relevant to the engagement.
 app.MapDelete("/targets/{id}", (string id) => db.Targets.Remove(id) ? Results.NoContent() : Results.NotFound());
 
+// ---- Scan Results Management ----
+// Upload and store parsed Nmap scan results for a target
+app.MapPost("/targets/{id}/scan", (string id, ParseRequest req) => {
+    if (!db.Targets.TryGetValue(id, out var target)) return Results.NotFound();
+    var parsed = NmapParser.Parse(req.NmapOutput ?? "");
+    db.Targets[id] = target with { Ports = parsed };
+    return Results.Ok(new { TargetId = id, PortsDetected = parsed.Count, Ports = parsed });
+});
+
+// Retrieve stored scan results for a target
+app.MapGet("/targets/{id}/scan", (string id) => {
+    if (!db.Targets.TryGetValue(id, out var target)) return Results.NotFound();
+    if (target.Ports == null || !target.Ports.Any()) 
+        return Results.Ok(new { Message = "No scan results uploaded yet", Ports = new List<OpenPort>() });
+    return Results.Ok(new { TargetId = id, PortsDetected = target.Ports.Count, Ports = target.Ports });
+});
+
 // ---- Helper: Suggest Nmap commands (with explanations) ----
 // Generates a curated list of scan commands based on IP/OS selections.
 app.MapPost("/nmap/suggest", (SuggestRequest req) => {
@@ -68,6 +85,7 @@ app.MapPost("/nmap/suggest", (SuggestRequest req) => {
 
 // ---- Helper: Parse pasted Nmap normal output ----
 // Converts raw Nmap output into structured `OpenPort` records.
+// Note: This is stateless. Use POST /targets/{id}/scan to save results.
 app.MapPost("/nmap/parse", (ParseRequest req) => {
     var parsed = NmapParser.Parse(req.NmapOutput ?? "");
     return Results.Ok(parsed);
@@ -88,7 +106,7 @@ public record SuggestRequest(string Ip, string Os); // Os: "Windows"|"Linux"
 public record ParseRequest(string? NmapOutput);
 public record NextStepsRequest(string Ip, string Os, List<OpenPort>? Ports);
 public record Session(string Id, string Name);
-public record Target(string Id, string SessionId, string Ip, string Os);
+public record Target(string Id, string SessionId, string Ip, string Os, List<OpenPort>? Ports = null);
 
 // Tiny persistence wrapper so endpoints can share mutable state.
 class InMemoryDb {
