@@ -35,6 +35,7 @@ app.MapDelete("/sessions/{id}", (string id) => db.Sessions.Remove(id) ? Results.
 app.MapPost("/targets", (Target t) =>
 {
     if (!db.Sessions.ContainsKey(t.SessionId)) return Results.BadRequest("Session not found");
+    if (!IpValidator.IsValid(t.Ip)) return Results.BadRequest("Invalid IP address. Please provide a valid IP address (e.g., 192.168.1.1) or IP with CIDR notation (e.g., 192.168.1.0/24)");
     var id = Guid.NewGuid().ToString("n");
     t = t with { Id = id };
     db.Targets[id] = t;
@@ -50,6 +51,7 @@ app.MapPut("/targets/{id}", (string id, Target t) =>
 {
     if (!db.Targets.ContainsKey(id)) return Results.NotFound();
     if (!db.Sessions.ContainsKey(t.SessionId)) return Results.BadRequest("Session not found");
+    if (!IpValidator.IsValid(t.Ip)) return Results.BadRequest("Invalid IP address. Please provide a valid IP address (e.g., 192.168.1.1) or IP with CIDR notation (e.g., 192.168.1.0/24)");
     db.Targets[id] = t with { Id = id };
     return Results.Ok(db.Targets[id]);
 });
@@ -197,3 +199,17 @@ public static class NextStepsSuggester {
 }
 // Lightweight DTO returned from `/next-steps`.
 public record Suggestion(string Area, string Tip);
+
+// Validates IP addresses and CIDR notation to prevent invalid input.
+public static class IpValidator
+{
+    private static readonly Regex IpAddressPattern = new(
+        @"^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(?:/(?:[0-9]|[12][0-9]|3[0-2]))?$",
+        RegexOptions.Compiled);
+
+    public static bool IsValid(string ip)
+    {
+        if (string.IsNullOrWhiteSpace(ip)) return false;
+        return IpAddressPattern.IsMatch(ip.Trim());
+    }
+}
