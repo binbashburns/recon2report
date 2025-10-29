@@ -59,6 +59,23 @@ app.MapPut("/targets/{id}", (string id, Target t) =>
 // Clean up a target when it is no longer relevant to the engagement.
 app.MapDelete("/targets/{id}", (string id) => db.Targets.Remove(id) ? Results.NoContent() : Results.NotFound());
 
+// ---- Scan Results Management ----
+// Upload and store parsed Nmap scan results for a target
+app.MapPost("/targets/{id}/scan", (string id, ParseRequest req) => {
+    if (!db.Targets.TryGetValue(id, out var target)) return Results.NotFound();
+    var parsed = NmapParser.Parse(req.NmapOutput ?? "");
+    db.Targets[id] = target with { Ports = parsed };
+    return Results.Ok(new { TargetId = id, PortsDetected = parsed.Count, Ports = parsed });
+});
+
+// Retrieve stored scan results for a target
+app.MapGet("/targets/{id}/scan", (string id) => {
+    if (!db.Targets.TryGetValue(id, out var target)) return Results.NotFound();
+    if (target.Ports == null || !target.Ports.Any()) 
+        return Results.Ok(new { Message = "No scan results uploaded yet", Ports = new List<OpenPort>() });
+    return Results.Ok(new { TargetId = id, PortsDetected = target.Ports.Count, Ports = target.Ports });
+});
+
 // ---- Helper: Suggest Nmap commands (with explanations) ----
 // Generates a curated list of scan commands based on IP/OS selections.
 app.MapPost("/nmap/suggest", (SuggestRequest req) => {
@@ -68,6 +85,7 @@ app.MapPost("/nmap/suggest", (SuggestRequest req) => {
 
 // ---- Helper: Parse pasted Nmap normal output ----
 // Converts raw Nmap output into structured `OpenPort` records.
+// Note: This is stateless. Use POST /targets/{id}/scan to save results.
 app.MapPost("/nmap/parse", (ParseRequest req) => {
     var parsed = NmapParser.Parse(req.NmapOutput ?? "");
     return Results.Ok(parsed);
@@ -76,7 +94,7 @@ app.MapPost("/nmap/parse", (ParseRequest req) => {
 // ---- Helper: Next-step suggestions from OS + ports ----
 // Converts the OS + open ports into actionable enumeration recommendations.
 app.MapPost("/next-steps", (NextStepsRequest req) => {
-    var steps = NextStepsSuggester.Suggest(req.Os, req.Ports ?? []);
+    var steps = NextStepsSuggester.Suggest(req.Ip, req.Os, req.Ports ?? []);
     return Results.Ok(steps);
 });
 
@@ -86,9 +104,9 @@ app.Run();
 // Request DTOs exposed to the front-end for helper endpoints.
 public record SuggestRequest(string Ip, string Os); // Os: "Windows"|"Linux"
 public record ParseRequest(string? NmapOutput);
-public record NextStepsRequest(string Os, List<OpenPort>? Ports);
+public record NextStepsRequest(string Ip, string Os, List<OpenPort>? Ports);
 public record Session(string Id, string Name);
-public record Target(string Id, string SessionId, string Ip, string Os);
+public record Target(string Id, string SessionId, string Ip, string Os, List<OpenPort>? Ports = null);
 
 // Tiny persistence wrapper so endpoints can share mutable state.
 class InMemoryDb {
@@ -101,25 +119,34 @@ class InMemoryDb {
 public static class NmapCommandBuilder {
     public static IEnumerable<NmapCommand> Build(string ip, string os)
     {
-        yield return new("Full TCP fast sweep",
-            $"nmap -p- --min-rate 10000 -oN nmap_all_tcp.txt {ip}",
-            "Discovers open TCP ports quickly; increase --min-rate for speed, decrease for accuracy.");
+        // Quick discovery scan
+        yield return new("Quick Scan (Top 100 ports)",
+            $"nmap --top-ports 100 -oN nmap_quick.txt {ip}",
+            "Fast discovery (~30 seconds). Great for initial enumeration of most common services.");
 
-        yield return new("Default scripts & versions",
-            $"nmap -sC -sV -oN nmap_default_scripts.txt {ip}",
-            "Runs default NSE scripts and grabs service versions to guide enumeration.");
+        // Standard recommended scan
+        yield return new("Standard Scan (Recommended)",
+            $"nmap -sV -sC -oN nmap_standard.txt {ip}",
+            "Top 1000 ports with version detection and default scripts (~2-5 minutes). Best starting point.");
 
-        yield return new("Top 200 UDP",
-            $"sudo nmap -sU --top-ports 200 -oN nmap_top_udp.txt {ip}",
-            "UDP is slower and lossy; start with top ports to catch DNS/SNMP/NTP/..");
+        // Full TCP scan (with better settings)
+        var fullScanPrefix = os.Equals("Windows", StringComparison.OrdinalIgnoreCase) ? "" : "sudo ";
+        yield return new("Full TCP Scan",
+            $"{fullScanPrefix}nmap -sS -p- --min-rate 5000 -T4 -oN nmap_all_ports.txt {ip}",
+            "Comprehensive scan of all 65,535 TCP ports (~20-40 minutes). Use sudo for faster SYN scan on Linux.");
 
-        // Tiny OS-specific nudge (purely textual)
+        // UDP scan
+        yield return new("Top UDP Ports",
+            $"sudo nmap -sU --top-ports 100 -oN nmap_udp.txt {ip}",
+            "UDP is slower; scan top 100 ports for DNS/SNMP/DHCP/NTP (~5-10 minutes).");
+
+        // OS-specific post-scan enumeration notes
         if (os.Equals("Windows", StringComparison.OrdinalIgnoreCase)) {
-            yield return new("Windows note", "N/A",
-                "If RDP (3389) or SMB (445) appear, plan SMB/RPC/RDP checks and Windows privesc later.");
+            yield return new("Windows Enumeration Tips", "N/A",
+                "After scan: Check SMB (445) with smbclient/enum4linux, RDP (3389) cipher strength, WinRM (5985/5986).");
         } else {
-            yield return new("Linux note", "N/A",
-                "If SSH (22) or web (80/443/8080) appear, plan enum (ssh-audit, gobuster, http-* NSE).");
+            yield return new("Linux Enumeration Tips", "N/A",
+                "After scan: Run ssh-audit on port 22, gobuster on web ports, check for NFS (2049), exploit-db searches.");
         }
     }
 }
@@ -159,7 +186,7 @@ public static class NmapParser {
 
 // Suggests playbook steps by matching ports/OS against a curated checklist.
 public static class NextStepsSuggester {
-    public static IEnumerable<Suggestion> Suggest(string os, IEnumerable<OpenPort> ports)
+    public static IEnumerable<Suggestion> Suggest(string ip, string os, IEnumerable<OpenPort> ports)
     {
         // Use a set for constant-time checks when matching well-known services.
         var set = ports.Select(p => p.Number).ToHashSet();
@@ -168,26 +195,26 @@ public static class NextStepsSuggester {
         yield return new("General", "Take note of service versions; search for matching exploits. Prefer non-MSF first.");
         // Web
         foreach (var p in ports.Where(p => new[] {80, 443, 8080, 8443}.Contains(p.Number))) {
-            yield return new("Web", $"http enum (NSE): nmap --script http-enum,http-title -p {p.Number} <IP>");
-            yield return new("Web", $"dir brute: gobuster dir -u http://<IP>:{p.Number} -w <wordlist>");
-            yield return new("Web", $"tech: whatweb http://<IP>:{p.Number}");
+            yield return new("Web", $"http enum (NSE): nmap --script http-enum,http-title -p {p.Number} {ip}");
+            yield return new("Web", $"dir brute: gobuster dir -u http://{ip}:{p.Number} -w <wordlist>");
+            yield return new("Web", $"tech: whatweb http://{ip}:{p.Number}");
         }
         // SMB
         if (set.Contains(445) || set.Contains(139)) {
-            yield return new("SMB", "enum: smbclient -L //<IP> -N");
-            yield return new("SMB", "enum: enum4linux-ng -A <IP>");
+            yield return new("SMB", $"enum: smbclient -L //{ip} -N");
+            yield return new("SMB", $"enum: enum4linux-ng -A {ip}");
         }
         // SSH
         if (set.Contains(22)) {
-            yield return new("SSH", "ssh-audit <IP>  # check ciphers/banner");
+            yield return new("SSH", $"ssh-audit {ip}  # check ciphers/banner");
         }
         // RDP
         if (set.Contains(3389)) {
-            yield return new("RDP", "nmap --script rdp-enum-encryption -p3389 <IP>");
+            yield return new("RDP", $"nmap --script rdp-enum-encryption -p3389 {ip}");
         }
         // DNS
         if (set.Contains(53)) {
-            yield return new("DNS", "dig axfr @<IP> <domain>  # (labs only) try zone transfer");
+            yield return new("DNS", $"dig axfr @{ip} <domain>  # (labs only) try zone transfer");
         }
         // PrivEsc checklists (textual nudge only)
         if (os.Equals("Linux", StringComparison.OrdinalIgnoreCase)) {
