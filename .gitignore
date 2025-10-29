@@ -52,3 +52,8 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+
+# CLI Outputs
+nmap_all_tcp.txt
+nmap_default_scripts.txt
+nmap_top_udp.txt

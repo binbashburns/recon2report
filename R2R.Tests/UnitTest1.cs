@@ -29,7 +29,7 @@ public class NextStepsTests
     public void SuggestsWebEnumForWebPorts()
     {
         var ports = new[]{ new OpenPort(80,"tcp","http","Apache") };
-        var tips = NextStepsSuggester.Suggest("Linux", ports).ToList();
+        var tips = NextStepsSuggester.Suggest("10.10.10.10", "Linux", ports).ToList();
         Assert.Contains(tips, t => t.Area=="Web" && t.Tip.Contains("http-enum"));
     }
 
@@ -37,8 +37,8 @@ public class NextStepsTests
     public void SuggestsLinuxOrWindowsPrivesc()
     {
         var none = Enumerable.Empty<OpenPort>();
-        var linux = NextStepsSuggester.Suggest("Linux", none);
-        var win   = NextStepsSuggester.Suggest("Windows", none);
+        var linux = NextStepsSuggester.Suggest("10.10.10.10", "Linux", none);
+        var win   = NextStepsSuggester.Suggest("192.168.1.1", "Windows", none);
         Assert.Contains(linux, t => t.Area=="PrivEsc" && t.Tip.Contains("linpeas"));
         Assert.Contains(win,   t => t.Area=="PrivEsc" && t.Tip.Contains("winPEAS"));
     }

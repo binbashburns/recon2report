@@ -3,9 +3,9 @@
 Better pentesting, from recon to reporting.
 
 ## Overview
-- **R2R.Api** — ASP.NET Core minimal API that stores session/target data in memory and exposes helper endpoints for Nmap parsing and follow-up suggestions.
-- **R2R.Cli** — Lightweight console client that drives the API workflow from the terminal.
-- **R2R.Tests** — xUnit tests that cover the parsing/suggestion helpers.
+- **R2R.Api**: ASP.NET Core minimal API that stores session/target data in memory and exposes helper endpoints for Nmap parsing and follow-up suggestions.
+- **R2R.Cli**: Lightweight console client that drives the API workflow from the terminal.
+- **R2R.Tests**: xUnit tests that cover the parsing/suggestion helpers.
 
 Everything runs in-memory (no persistence yet) so it is ideal for quick lab-style recon exercises.
 
