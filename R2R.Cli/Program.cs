@@ -166,11 +166,60 @@ Console.WriteLine($"\nOpen ports detected: {scanResult!.PortsDetected}");
 
 foreach (var p in scanResult.Ports) Console.WriteLine($"- {p.Protocol}/{p.Number} {p.Service} {p.Version}");
 
-// Ask the API for the generalized follow-up checklist.
-Console.WriteLine("\nNext steps (generalized):");
-var nextResp = await api.PostAsJsonAsync("next-steps", new { Ip = target.Ip, Os = target.Os, Ports = scanResult.Ports });
-var tips = await nextResp.Content.ReadFromJsonAsync<List<Suggestion>>();
-foreach (var t in tips!) Console.WriteLine($"[{t.Area}] {t.Tip}");
+// Ask the API for attack path suggestions based on current state
+Console.WriteLine("\n=== Suggested Attack Paths ===");
+var attackPathReq = new {
+    CurrentPhase = "no_creds",
+    TargetIp = target.Ip,
+    IpRange = "", // Could prompt user for this
+    DomainName = "", // Could prompt user for this
+    OpenPorts = scanResult.Ports.Select(p => p.Number).ToList(),
+    Services = scanResult.Ports.Select(p => p.Service).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct().ToList(),
+    TargetOS = target.Os
+};
+
+var attackResp = await api.PostAsJsonAsync("attack-paths/suggest", attackPathReq);
+if (!attackResp.IsSuccessStatusCode)
+{
+    Console.ForegroundColor = ConsoleColor.Red;
+    Console.WriteLine("Failed to get attack path suggestions.");
+    Console.ResetColor();
+}
+else
+{
+    var attackPaths = await attackResp.Content.ReadFromJsonAsync<AttackPathResponse>();
+    if (attackPaths?.ApplicableVectors?.Any() == true)
+    {
+        foreach (var vector in attackPaths.ApplicableVectors)
+        {
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine($"\n▶ {vector.Name}");
+            Console.ResetColor();
+            
+            if (vector.PossibleOutcomes?.Any() == true)
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine($"  Possible outcomes: {string.Join(", ", vector.PossibleOutcomes)}");
+                Console.ResetColor();
+            }
+            
+            if (vector.Commands?.Any() == true)
+            {
+                Console.WriteLine("  Commands:");
+                foreach (var cmd in vector.Commands)
+                {
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine($"    {cmd.ReadyCommand}");
+                    Console.ResetColor();
+                }
+            }
+        }
+    }
+    else
+    {
+        Console.WriteLine("No applicable attack vectors found for current state.");
+    }
+}
 
 // (Demonstrate CRUD to satisfy rubric)
 // Quick update demo shows PUT wiring end-to-end.
@@ -195,5 +244,9 @@ record Session(string Id, string Name);
 record Target(string Id, string SessionId, string Ip, string Os);
 record OpenPort(int Number, string Protocol, string? Service, string? Version);
 record NmapCommand(string Title, string Command, string Explanation);
-record Suggestion(string Area, string Tip);
 record ScanUploadResult(string TargetId, int PortsDetected, List<OpenPort> Ports);
+
+// Attack path response DTOs
+record AttackPathResponse(string CurrentPhase, object TargetContext, List<AttackVector> ApplicableVectors);
+record AttackVector(string Id, string Name, List<string> Prerequisites, List<string> PossibleOutcomes, List<AttackCommand> Commands);
+record AttackCommand(string Tool, string RawSyntax, string ReadyCommand);
