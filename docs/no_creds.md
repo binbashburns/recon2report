@@ -39,10 +39,10 @@
 ## Poisoning >>> poisoning SMB || poisoning LDAP || poisoning HTTP
 - LLMNR / NBTNS / MDNS
   - `responder -l <interface>`
-- ⚠️ DHCPv6 (IPv6 prefered to IPv4)
+- DHCPv6 (IPv6 prefered to IPv4)
   - `mitm6 -d <domain>`
   - `bettercap`
-- ⚠️ ARP Poisoning
+- ARP Poisoning
   - `bettercap`
   - `asreqroast`
     - `Pcredz -i <interface> -v` >>> Hash found ASREQ

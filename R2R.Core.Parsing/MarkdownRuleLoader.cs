@@ -32,10 +32,22 @@ public class MarkdownRuleLoader
         var document = Markdown.Parse(markdownContent);
         var vectors = new List<AttackVector>();
         
-        // Extract the main title (H1)
-        var mainTitle = document.Descendants<HeadingBlock>()
-            .FirstOrDefault(h => h.Level == 1)
-            ?.Inline?.FirstChild?.ToString() ?? id;
+        // Extract the main title (H1) and look for @phase: tag
+        var h1Block = document.Descendants<HeadingBlock>().FirstOrDefault(h => h.Level == 1);
+        var mainTitle = h1Block?.Inline?.FirstChild?.ToString() ?? id;
+        
+        // Extract phase from title if present (e.g., "# Title @phase:reconnaissance@")
+        var phase = ExtractPhaseFromTitle(mainTitle);
+        if (phase != null)
+        {
+            // Remove the phase tag from the display title
+            mainTitle = System.Text.RegularExpressions.Regex.Replace(mainTitle, @"\s*@phase:[^@]+@\s*", "").Trim();
+        }
+        else
+        {
+            // Default phase mapping based on filename
+            phase = MapFilenameToPhase(id);
+        }
 
         var initialState = id.Replace("_", "").ToLowerInvariant();
 
@@ -46,12 +58,50 @@ public class MarkdownRuleLoader
 
         foreach (var heading in headings)
         {
-            var vector = ParseAttackVector(heading, initialState);
+            // Use phase as prerequisite so it matches the current phase in RuleEngine
+            var vector = ParseAttackVector(heading, phase);
             if (vector != null)
                 vectors.Add(vector);
         }
 
-        return new RuleSet(id, mainTitle, initialState, vectors);
+        return new RuleSet(id, mainTitle, initialState, phase, vectors);
+    }
+
+    /// <summary>
+    /// Extracts phase tag from markdown title (e.g., "@phase:reconnaissance@")
+    /// </summary>
+    private static string? ExtractPhaseFromTitle(string title)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(title, @"@phase:([^@]+)@");
+        return match.Success ? match.Groups[1].Value.Trim().ToLowerInvariant() : null;
+    }
+
+    /// <summary>
+    /// Maps filename to default phase if no explicit phase tag is found
+    /// </summary>
+    private static string MapFilenameToPhase(string filename)
+    {
+        return filename.ToLowerInvariant() switch
+        {
+            "no_creds" => "reconnaissance",
+            "low_hanging" => "always",
+            "mitm" => "initial_access",
+            "valid_user" => "credential_access",
+            "crack_hash" => "credential_access",
+            "authenticated" => "lateral_movement",
+            "lat_move" => "lateral_movement",
+            "low_access" => "lateral_movement",
+            "delegation" => "privilege_escalation",
+            "acl" => "privilege_escalation",
+            "adcs" => "privilege_escalation",
+            "sccm" => "privilege_escalation",
+            "know_vuln_auth" => "privilege_escalation",
+            "admin" => "domain_admin",
+            "dom_admin" => "domain_admin",
+            "trusts" => "domain_admin",
+            "persistence" => "persistence",
+            _ => "reconnaissance" // Default to earliest phase
+        };
     }
 
     private static AttackVector? ParseAttackVector(HeadingBlock heading, string prerequisite)

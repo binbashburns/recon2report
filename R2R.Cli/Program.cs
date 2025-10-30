@@ -27,10 +27,18 @@ sessResp.EnsureSuccessStatusCode();
 var session = await sessResp.Content.ReadFromJsonAsync<Session>();
 Console.WriteLine($"Session: {session!.Id}");
 
-Console.Write("Target IP: ");
+Console.Write("Target IP or IP Range: ");
 var ip = Console.ReadLine() ?? "";
 Console.Write("OS (Windows/Linux): ");
-var os = Console.ReadLine() ?? "Linux";
+var osInput = Console.ReadLine()?.Trim().ToLowerInvariant() ?? "linux";
+
+// Normalize OS input
+var os = osInput switch
+{
+    "win" or "windows" or "w" => "Windows",
+    "linux" or "lin" or "l" or "unix" => "Linux",
+    _ => "Unknown"
+};
 
 var tgtResp = await api.PostAsJsonAsync("targets", new { Id = "", SessionId = session.Id, Ip = ip, Os = os });
 if (!tgtResp.IsSuccessStatusCode)
@@ -42,7 +50,10 @@ if (!tgtResp.IsSuccessStatusCode)
     return;
 }
 var target = await tgtResp.Content.ReadFromJsonAsync<Target>();
-Console.WriteLine($"Target: {target!.Id} {target.Ip} ({target.Os})");
+
+// Display target info
+var targetType = ip.Contains("/") || ip.Contains("-") ? "IP Range" : "IP";
+Console.WriteLine($"Target: {target!.Id} ({targetType}: {target.Ip}, OS: {target.Os})");
 
 // Fetch scan commands from API
 var cmdResp = await api.PostAsJsonAsync("nmap/suggest", new { Ip = target.Ip, Os = target.Os });
@@ -132,7 +143,7 @@ if (enumTips.Any())
     foreach (var tip in enumTips)
     {
         Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine($"💡 {tip.Title}:");
+        Console.WriteLine($" {tip.Title}:");
         Console.ResetColor();
         Console.WriteLine($"   {tip.Explanation}");
     }
@@ -166,87 +177,309 @@ Console.WriteLine($"\nOpen ports detected: {scanResult!.PortsDetected}");
 
 foreach (var p in scanResult.Ports) Console.WriteLine($"- {p.Protocol}/{p.Number} {p.Service} {p.Version}");
 
-// Ask the API for attack path suggestions based on current state
-Console.WriteLine("\n=== Suggested Attack Paths ===");
-var attackPathReq = new {
-    CurrentPhase = "no_creds",
-    TargetIp = target.Ip,
-    IpRange = "", // Could prompt user for this
-    DomainName = "", // Could prompt user for this
-    OpenPorts = scanResult.Ports.Select(p => p.Number).ToList(),
-    Services = scanResult.Ports.Select(p => p.Service).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct().ToList(),
-    TargetOS = target.Os
-};
+// Interactive loop for attack progression
+var currentPhase = "reconnaissance";
+var acquiredItems = new List<string>();
+string? ipRange = null;
+string? domainName = null;
 
-var attackResp = await api.PostAsJsonAsync("attack-paths/suggest", attackPathReq);
-if (!attackResp.IsSuccessStatusCode)
+// Display discovered information if any and auto-populate state
+if (scanResult.DiscoveredInfo != null)
 {
-    Console.ForegroundColor = ConsoleColor.Red;
-    Console.WriteLine("Failed to get attack path suggestions.");
-    Console.ResetColor();
-}
-else
-{
-    var attackPaths = await attackResp.Content.ReadFromJsonAsync<AttackPathResponse>();
-    if (attackPaths?.ApplicableVectors?.Any() == true)
+    var info = scanResult.DiscoveredInfo;
+    var hasInfo = !string.IsNullOrWhiteSpace(info.DomainName) ||
+                  !string.IsNullOrWhiteSpace(info.ComputerName) ||
+                  !string.IsNullOrWhiteSpace(info.FQDN) ||
+                  !string.IsNullOrWhiteSpace(info.DetectedOS);
+    
+    if (hasInfo)
     {
-        foreach (var vector in attackPaths.ApplicableVectors)
+        Console.WriteLine("\n Discovered Information:");
+        if (!string.IsNullOrWhiteSpace(info.DomainName))
         {
-            Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine($"\n▶ {vector.Name}");
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine($"   Domain: {info.DomainName}");
             Console.ResetColor();
-            
-            if (vector.PossibleOutcomes?.Any() == true)
-            {
-                Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine($"  Possible outcomes: {string.Join(", ", vector.PossibleOutcomes)}");
-                Console.ResetColor();
-            }
-            
-            if (vector.Commands?.Any() == true)
-            {
-                Console.WriteLine("  Commands:");
-                foreach (var cmd in vector.Commands)
-                {
-                    Console.ForegroundColor = ConsoleColor.Green;
-                    Console.WriteLine($"    {cmd.ReadyCommand}");
-                    Console.ResetColor();
-                }
-            }
+            domainName = info.DomainName; // Auto-populate for attack suggestions
+            acquiredItems.Add("domain");
         }
+        if (!string.IsNullOrWhiteSpace(info.ComputerName))
+            Console.WriteLine($"   Computer: {info.ComputerName}");
+        if (!string.IsNullOrWhiteSpace(info.FQDN))
+            Console.WriteLine($"   FQDN: {info.FQDN}");
+        if (!string.IsNullOrWhiteSpace(info.DetectedOS))
+            Console.WriteLine($"   Detected OS: {info.DetectedOS}");
+    }
+}
+
+while (true)
+{
+    // Ask the API for attack path suggestions based on current state
+    Console.WriteLine($"\n=== Attack Vectors for Phase: {currentPhase} ===");
+    var attackPathReq = new {
+        CurrentPhase = currentPhase,
+        AcquiredItems = acquiredItems,
+        TargetIp = target.Ip,
+        IpRange = ipRange ?? "",
+        DomainName = domainName ?? "",
+        OpenPorts = scanResult.Ports.Select(p => p.Number).ToList(),
+        Services = scanResult.Ports.Select(p => p.Service).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct().ToList(),
+        TargetOS = target.Os
+    };
+
+    var attackResp = await api.PostAsJsonAsync("attack-paths/suggest", attackPathReq);
+    if (!attackResp.IsSuccessStatusCode)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine("Failed to get attack path suggestions.");
+        Console.ResetColor();
     }
     else
     {
-        Console.WriteLine("No applicable attack vectors found for current state.");
+        var attackPaths = await attackResp.Content.ReadFromJsonAsync<AttackPathResponse>();
+        if (attackPaths?.ApplicableVectors?.Any() == true)
+        {
+            foreach (var vector in attackPaths.ApplicableVectors)
+            {
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                Console.WriteLine($"\n {vector.Name}");
+                Console.ResetColor();
+                
+                if (vector.PossibleOutcomes?.Any() == true)
+                {
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.WriteLine($"  Possible outcomes: {string.Join(", ", vector.PossibleOutcomes)}");
+                    Console.ResetColor();
+                }
+                
+                if (vector.Commands?.Any() == true)
+                {
+                    Console.WriteLine("  Commands:");
+                    foreach (var cmd in vector.Commands)
+                    {
+                        Console.ForegroundColor = ConsoleColor.Green;
+                        Console.WriteLine($"    {cmd.ReadyCommand}");
+                        Console.ResetColor();
+                    }
+                }
+            }
+        }
+        else
+        {
+            Console.WriteLine("No applicable attack vectors found for current state.");
+        }
+    }
+
+    // Interactive menu
+    Console.WriteLine("\n--- Options ---");
+    Console.WriteLine("1. Add information (domain, username, etc.)");
+    Console.WriteLine("2. Change phase");
+    Console.WriteLine("3. Show commands from any phase (raw output)");
+    Console.WriteLine("4. Update target OS");
+    Console.WriteLine("5. Exit");
+    Console.Write("Choice: ");
+    
+    var menuChoice = Console.ReadLine()?.Trim();
+    
+    switch (menuChoice)
+    {
+        case "1":
+            Console.WriteLine("\n--- Add Information ---");
+            Console.WriteLine("1. Domain name");
+            Console.WriteLine("2. IP range");
+            Console.WriteLine("3. Username");
+            Console.WriteLine("4. Password");
+            Console.WriteLine("5. Hash");
+            Console.WriteLine("6. Custom item");
+            Console.Write("Choice [1-6]: ");
+            var infoChoice = Console.ReadLine()?.Trim();
+            
+            switch (infoChoice)
+            {
+                case "1":
+                    Console.Write("Domain name: ");
+                    domainName = Console.ReadLine()?.Trim();
+                    if (!string.IsNullOrWhiteSpace(domainName))
+                    {
+                        acquiredItems.Add("domain");
+                        Console.ForegroundColor = ConsoleColor.Green;
+                        Console.WriteLine($"✓ Domain set to: {domainName}");
+                        Console.ResetColor();
+                    }
+                    break;
+                case "2":
+                    Console.Write("IP range (e.g., 192.168.1.0/24): ");
+                    ipRange = Console.ReadLine()?.Trim();
+                    if (!string.IsNullOrWhiteSpace(ipRange))
+                    {
+                        Console.ForegroundColor = ConsoleColor.Green;
+                        Console.WriteLine($"✓ IP range set to: {ipRange}");
+                        Console.ResetColor();
+                    }
+                    break;
+                case "3":
+                    Console.Write("Username: ");
+                    var username = Console.ReadLine()?.Trim();
+                    if (!string.IsNullOrWhiteSpace(username))
+                    {
+                        acquiredItems.Add("username");
+                        Console.ForegroundColor = ConsoleColor.Green;
+                        Console.WriteLine($"✓ Added username to acquired items");
+                        Console.ResetColor();
+                    }
+                    break;
+                case "4":
+                    acquiredItems.Add("password");
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine("✓ Added 'password' to acquired items");
+                    Console.ResetColor();
+                    break;
+                case "5":
+                    acquiredItems.Add("hash");
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine("✓ Added 'hash' to acquired items");
+                    Console.ResetColor();
+                    break;
+                case "6":
+                    Console.Write("Custom item name: ");
+                    var customItem = Console.ReadLine()?.Trim();
+                    if (!string.IsNullOrWhiteSpace(customItem))
+                    {
+                        acquiredItems.Add(customItem);
+                        Console.ForegroundColor = ConsoleColor.Green;
+                        Console.WriteLine($"✓ Added '{customItem}' to acquired items");
+                        Console.ResetColor();
+                    }
+                    break;
+                default:
+                    Console.WriteLine("Invalid choice");
+                    break;
+            }
+            break;
+            
+        case "2":
+            Console.WriteLine("\n--- Change Phase ---");
+            Console.WriteLine("1. reconnaissance");
+            Console.WriteLine("2. credential_access");
+            Console.WriteLine("3. lateral_movement");
+            Console.WriteLine("4. privilege_escalation");
+            Console.WriteLine("5. domain_admin");
+            Console.WriteLine("6. persistence");
+            Console.Write("Choice [1-6]: ");
+            var phaseChoice = Console.ReadLine()?.Trim();
+            var newPhase = phaseChoice switch
+            {
+                "1" => "reconnaissance",
+                "2" => "credential_access",
+                "3" => "lateral_movement",
+                "4" => "privilege_escalation",
+                "5" => "domain_admin",
+                "6" => "persistence",
+                _ => currentPhase
+            };
+            if (newPhase != currentPhase)
+            {
+                currentPhase = newPhase;
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine($"✓ Phase changed to: {currentPhase}");
+                Console.ResetColor();
+            }
+            break;
+            
+        case "3":
+            Console.WriteLine("\n--- Raw Command Output (All Vectors) ---");
+            Console.WriteLine("1. reconnaissance");
+            Console.WriteLine("2. credential_access");
+            Console.WriteLine("3. lateral_movement");
+            Console.WriteLine("4. privilege_escalation");
+            Console.WriteLine("5. domain_admin");
+            Console.WriteLine("6. persistence");
+            Console.Write("Choice [1-6]: ");
+            var rawPhaseChoice = Console.ReadLine()?.Trim();
+            var rawPhase = rawPhaseChoice switch
+            {
+                "1" => "reconnaissance",
+                "2" => "credential_access",
+                "3" => "lateral_movement",
+                "4" => "privilege_escalation",
+                "5" => "domain_admin",
+                "6" => "persistence",
+                _ => "reconnaissance"
+            };
+            
+            var rawResp = await api.GetAsync($"attack-paths/phase/{rawPhase}");
+            if (rawResp.IsSuccessStatusCode)
+            {
+                var rawPaths = await rawResp.Content.ReadFromJsonAsync<RawPhaseResponse>();
+                if (rawPaths?.Vectors?.Any() == true)
+                {
+                    Console.WriteLine($"\n=== All commands for {rawPhase} ({rawPaths.TotalVectors} vectors) ===");
+                    foreach (var vector in rawPaths.Vectors)
+                    {
+                        Console.ForegroundColor = ConsoleColor.Cyan;
+                        Console.WriteLine($"\n {vector.Name}");
+                        Console.ResetColor();
+                        
+                        if (vector.Prerequisites?.Any() == true)
+                        {
+                            Console.ForegroundColor = ConsoleColor.DarkYellow;
+                            Console.WriteLine($"  [Requires: {string.Join(", ", vector.Prerequisites)}]");
+                            Console.ResetColor();
+                        }
+                        
+                        foreach (var cmd in vector.Commands ?? new())
+                        {
+                            Console.ForegroundColor = ConsoleColor.Green;
+                            Console.WriteLine($"  {cmd.RawSyntax}");
+                            Console.ResetColor();
+                        }
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("No vectors found for that phase.");
+                }
+            }
+            else
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine("Failed to get raw commands.");
+                Console.ResetColor();
+            }
+            break;
+            
+        case "4":
+            Console.Write("New OS: ");
+            var newOs = Console.ReadLine() ?? target.Os;
+            var put = await api.PutAsJsonAsync($"targets/{target.Id}", new { Id = target.Id, SessionId = session.Id, Ip = target.Ip, Os = newOs });
+            Console.WriteLine(put.IsSuccessStatusCode ? "Updated." : "Update failed.");
+            target = target with { Os = newOs };
+            break;
+            
+        case "5":
+            Console.WriteLine("\nExiting...");
+            return;
+            
+        default:
+            Console.WriteLine("Invalid choice");
+            break;
     }
 }
-
-// (Demonstrate CRUD to satisfy rubric)
-// Quick update demo shows PUT wiring end-to-end.
-Console.Write("\nDo you want to update the target OS? (y/N) ");
-if ((Console.ReadLine() ?? "").Trim().ToLower() == "y") {
-    Console.Write("New OS: ");
-    var newOs = Console.ReadLine() ?? target.Os;
-    var put = await api.PutAsJsonAsync($"targets/{target.Id}", new { Id = target.Id, SessionId = session.Id, Ip = target.Ip, Os = newOs });
-    Console.WriteLine(put.IsSuccessStatusCode ? "Updated." : "Update failed.");
-}
-// And delete to complete the CRUD story.
-Console.Write("\nDelete target to demo CRUD? (y/N) ");
-if ((Console.ReadLine() ?? "").Trim().ToLower() == "y") {
-    var del = await api.DeleteAsync($"targets/{target.Id}");
-    Console.WriteLine(del.IsSuccessStatusCode ? "Deleted." : "Delete failed.");
-}
-
-Console.WriteLine("\nDone");
 
 // Local DTOs (mirror API)
 record Session(string Id, string Name);
 record Target(string Id, string SessionId, string Ip, string Os);
 record OpenPort(int Number, string Protocol, string? Service, string? Version);
 record NmapCommand(string Title, string Command, string Explanation);
-record ScanUploadResult(string TargetId, int PortsDetected, List<OpenPort> Ports);
+record ScanUploadResult(string TargetId, int PortsDetected, List<OpenPort> Ports, DiscoveredInfo? DiscoveredInfo);
+record DiscoveredInfo(string? DomainName, string? ComputerName, string? FQDN, string? DetectedOS);
 
 // Attack path response DTOs
 record AttackPathResponse(string CurrentPhase, object TargetContext, List<AttackVector> ApplicableVectors);
 record AttackVector(string Id, string Name, List<string> Prerequisites, List<string> PossibleOutcomes, List<AttackCommand> Commands);
 record AttackCommand(string Tool, string RawSyntax, string ReadyCommand);
+
+// Raw phase output (no filtering)
+record RawPhaseResponse(string Phase, int TotalVectors, List<RawVector> Vectors);
+record RawVector(string Id, string Name, List<string> Prerequisites, List<string> PossibleOutcomes, List<RawCommand> Commands);
+record RawCommand(string Tool, string RawSyntax);

@@ -13,47 +13,49 @@ var app = builder.Build();
 // Load rule sets at startup
 var ruleSets = new List<RuleSet>();
 var docsPath = Path.Combine(Directory.GetCurrentDirectory(), "..", "docs");
-Console.WriteLine($"Looking for docs at: {docsPath}");
-Console.WriteLine($"Docs directory exists: {Directory.Exists(docsPath)}");
+Console.WriteLine($"Looking for attack path files in: {docsPath}");
 
 if (Directory.Exists(docsPath))
 {
-    var noCredsFile = Path.Combine(docsPath, "no_creds.md");
-    Console.WriteLine($"Looking for file: {noCredsFile}");
-    Console.WriteLine($"File exists: {File.Exists(noCredsFile)}");
+    // Load all markdown files from docs directory
+    var markdownFiles = Directory.GetFiles(docsPath, "*.md", SearchOption.TopDirectoryOnly).ToList();
     
-    if (File.Exists(noCredsFile))
+    Console.WriteLine($"Found {markdownFiles.Count} attack path file(s)");
+    
+    foreach (var mdFile in markdownFiles)
     {
         try
         {
-            var ruleSet = MarkdownRuleLoader.LoadFromFile(noCredsFile);
+            var ruleSet = MarkdownRuleLoader.LoadFromFile(mdFile);
             ruleSets.Add(ruleSet);
-            Console.WriteLine($"✓ Loaded ruleset: {ruleSet.Name} with {ruleSet.Vectors.Count} attack vectors");
-            
-            // Debug: print first few vectors
-            foreach (var vector in ruleSet.Vectors.Take(3))
-            {
-                Console.WriteLine($"  - Vector: {vector.Name} (Prerequisites: {string.Join(", ", vector.Prerequisites)})");
-            }
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine($"  ✓ {Path.GetFileName(mdFile)}: {ruleSet.Name} - Phase: {ruleSet.Phase} ({ruleSet.Vectors.Count} vectors)");
+            Console.ResetColor();
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"⚠ Failed to load no_creds.md: {ex.Message}");
-            Console.WriteLine($"Stack trace: {ex.StackTrace}");
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"  ✗ {Path.GetFileName(mdFile)}: {ex.Message}");
+            Console.ResetColor();
         }
     }
-    else
+    
+    if (!ruleSets.Any())
     {
-        Console.WriteLine("⚠ no_creds.md not found");
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine("No attack path files loaded. Add .md files to /docs directory.");
+        Console.ResetColor();
     }
 }
 else
 {
-    Console.WriteLine("⚠ docs directory not found");
+    Console.ForegroundColor = ConsoleColor.Yellow;
+    Console.WriteLine($"Docs directory not found at: {docsPath}");
+    Console.ResetColor();
 }
 
 var ruleEngine = new RuleEngine(ruleSets);
-Console.WriteLine($"Rule engine initialized with {ruleSets.Count} ruleset(s)");
+Console.WriteLine($"Rule engine initialized with {ruleSets.Count} ruleset(s)\n");
 
 // Enable Swagger UI
 app.UseSwagger();
@@ -111,9 +113,20 @@ app.MapDelete("/targets/{id}", (string id) => db.Targets.Remove(id) ? Results.No
 // Upload and store parsed Nmap scan results for a target
 app.MapPost("/targets/{id}/scan", (string id, ParseRequest req) => {
     if (!db.Targets.TryGetValue(id, out var target)) return Results.NotFound();
-    var parsed = NmapParser.Parse(req.NmapOutput ?? "");
-    db.Targets[id] = target with { Ports = parsed };
-    return Results.Ok(new { TargetId = id, PortsDetected = parsed.Count, Ports = parsed });
+    var parseResult = NmapParser.ParseFull(req.NmapOutput ?? "");
+    db.Targets[id] = target with { Ports = parseResult.Ports };
+    
+    return Results.Ok(new { 
+        TargetId = id, 
+        PortsDetected = parseResult.Ports.Count, 
+        Ports = parseResult.Ports,
+        DiscoveredInfo = new {
+            parseResult.DomainName,
+            parseResult.ComputerName,
+            parseResult.FQDN,
+            parseResult.DetectedOS
+        }
+    });
 });
 
 // Retrieve stored scan results for a target
@@ -142,46 +155,25 @@ app.MapPost("/nmap/parse", (ParseRequest req) => {
 // ---- Rule Engine: Suggest attack paths based on current state ----
 // Uses loaded markdown rule sets to suggest applicable attack vectors
 app.MapPost("/attack-paths/suggest", (AttackPathRequest req) => {
-    // Normalize the phase to match what the parser generates (removes underscores)
-    var normalizedPhase = (req.CurrentPhase ?? "no_creds")
-        .ToLowerInvariant()
-        .Replace("_", "")
-        .Replace("-", "")
-        .Trim();
-    
     var state = new AttackState(
-        CurrentPhase: normalizedPhase,
+        CurrentPhase: req.CurrentPhase ?? "reconnaissance",
         AcquiredItems: req.AcquiredItems ?? new List<string>(),
         OpenPorts: req.OpenPorts ?? new List<int>(),
         Services: req.Services ?? new List<string>(),
         TargetOS: req.TargetOS
     );
 
-    // Get all applicable vectors
-    var vectors = ruleEngine.Evaluate(state);
-
-    // Optionally filter by ports if provided
-    if (req.OpenPorts?.Any() == true)
-    {
-        var portVectors = ruleEngine.GetVectorsForPorts(state, req.OpenPorts);
-        vectors = vectors.Intersect(portVectors).ToList();
-    }
-
-    // Optionally filter by services if provided
-    if (req.Services?.Any() == true)
-    {
-        var serviceVectors = ruleEngine.GetVectorsForServices(state, req.Services);
-        vectors = vectors.Intersect(serviceVectors).ToList();
-    }
+    // Get all applicable vectors for current phase (includes "always" phase)
+    var allVectors = ruleEngine.Evaluate(state).ToList();
 
     return Results.Ok(new {
-        CurrentPhase = req.CurrentPhase ?? "no_creds",
+        CurrentPhase = req.CurrentPhase ?? "reconnaissance",
         TargetContext = new {
             TargetIp = req.TargetIp,
             DomainName = req.DomainName,
             IpRange = req.IpRange
         },
-        ApplicableVectors = vectors.Select(v => new {
+        ApplicableVectors = allVectors.Select(v => new {
             v.Id,
             v.Name,
             v.Prerequisites,
@@ -191,6 +183,54 @@ app.MapPost("/attack-paths/suggest", (AttackPathRequest req) => {
                 RawSyntax = c.Syntax,
                 // Substitute variables in command syntax
                 ReadyCommand = SubstituteVariables(c.Syntax, req.TargetIp, req.DomainName, req.IpRange)
+            }).ToList()
+        }).ToList()
+    });
+});
+
+// Get ALL vectors for a phase (no prerequisite filtering) - for reference/cheatsheet mode
+app.MapGet("/attack-paths/phase/{phase}", (string phase) => {
+    var state = new AttackState(
+        CurrentPhase: phase,
+        AcquiredItems: new List<string>(),
+        OpenPorts: new List<int>(),
+        Services: new List<string>(),
+        TargetOS: null // Don't filter by OS for raw output
+    );
+    
+    // Get matching rulesets without prerequisite filtering
+    var matchingRuleSets = ruleEngine.GetRuleSetsForPhase(phase);
+    var allVectors = matchingRuleSets.SelectMany(rs => rs.Vectors).ToList();
+    
+    return Results.Ok(new {
+        Phase = phase,
+        TotalVectors = allVectors.Count,
+        Vectors = allVectors.Select(v => new {
+            v.Id,
+            v.Name,
+            v.Prerequisites,
+            PossibleOutcomes = v.PossibleOutcomes.Select(o => o.DisplayName).ToList(),
+            Commands = v.Commands.Select(c => new { 
+                c.Tool, 
+                RawSyntax = c.Syntax
+            }).ToList()
+        }).ToList()
+    });
+});
+
+// Debug endpoint to see what's being filtered
+app.MapGet("/debug/vectors", () => {
+    return Results.Ok(new {
+        TotalRuleSets = ruleSets.Count,
+        RuleSets = ruleSets.Select(rs => new {
+            rs.Id,
+            rs.Name,
+            rs.Phase,
+            VectorCount = rs.Vectors.Count,
+            Vectors = rs.Vectors.Select(v => new {
+                v.Name,
+                v.Prerequisites,
+                CommandCount = v.Commands.Count
             }).ToList()
         }).ToList()
     });
@@ -293,27 +333,75 @@ public static class NmapParser {
 
     public static List<OpenPort> Parse(string output)
     {
-        var list = new List<OpenPort>();
+        return ParseFull(output).Ports;
+    }
+    
+    public static NmapParseResult ParseFull(string output)
+    {
+        var ports = new List<OpenPort>();
+        string? domainName = null;
+        string? computerName = null;
+        string? fqdn = null;
+        string? detectedOS = null;
+
         foreach (var raw in output.Split('\n')) {
             var line = raw.Trim();
+            
+            // Parse port lines
             var m = PortLine.Match(line);
-            if (!m.Success) continue;
-            if (!int.TryParse(m.Groups["port"].Value, out var port) || port < 1 || port > 65535) continue;
-            var proto   = m.Groups["proto"].Value;
-            var state   = m.Groups["state"].Value;
-            if (!string.Equals(state, "open", StringComparison.OrdinalIgnoreCase)) continue; // only “open” for next steps
-            var service = m.Groups["service"].Value;
-            var version = m.Groups["version"].Success ? m.Groups["version"].Value.Trim() : null;
-            list.Add(new OpenPort(port, proto, string.IsNullOrWhiteSpace(service) ? null : service, version));
+            if (m.Success) {
+                if (!int.TryParse(m.Groups["port"].Value, out var port) || port < 1 || port > 65535) continue;
+                var proto   = m.Groups["proto"].Value;
+                var state   = m.Groups["state"].Value;
+                if (!string.Equals(state, "open", StringComparison.OrdinalIgnoreCase)) continue;
+                var service = m.Groups["service"].Value;
+                var version = m.Groups["version"].Success ? m.Groups["version"].Value.Trim() : null;
+                ports.Add(new OpenPort(port, proto, string.IsNullOrWhiteSpace(service) ? null : service, version));
+                continue;
+            }
+            
+            // Extract domain info from smb-os-discovery
+            if (line.Contains("Domain name:", StringComparison.OrdinalIgnoreCase))
+            {
+                var parts = line.Split(':', 2);
+                if (parts.Length == 2 && !string.IsNullOrWhiteSpace(parts[1]))
+                    domainName = parts[1].Trim();
+            }
+            
+            if (line.Contains("Computer name:", StringComparison.OrdinalIgnoreCase))
+            {
+                var parts = line.Split(':', 2);
+                if (parts.Length == 2 && !string.IsNullOrWhiteSpace(parts[1]))
+                    computerName = parts[1].Trim();
+            }
+            
+            if (line.Contains("FQDN:", StringComparison.OrdinalIgnoreCase))
+            {
+                var parts = line.Split(':', 2);
+                if (parts.Length == 2 && !string.IsNullOrWhiteSpace(parts[1]))
+                    fqdn = parts[1].Trim();
+            }
+            
+            if (line.Contains("|   OS:", StringComparison.OrdinalIgnoreCase))
+            {
+                var parts = line.Split(':', 2);
+                if (parts.Length == 2 && !string.IsNullOrWhiteSpace(parts[1]))
+                    detectedOS = parts[1].Trim();
+            }
         }
-        // dedupe same port/proto pairs (keep first with version)
-        return list
+        
+        // Dedupe ports
+        var uniquePorts = ports
             .GroupBy(p => (p.Number, p.Protocol.ToLowerInvariant()))
             .Select(g => g.First())
             .OrderBy(p => p.Number)
             .ToList();
+
+        return new NmapParseResult(uniquePorts, domainName, computerName, fqdn, detectedOS);
     }
 }
+
+public record NmapParseResult(List<OpenPort> Ports, string? DomainName, string? ComputerName, string? FQDN, string? DetectedOS);
 
 // Validates IP addresses and CIDR notation to prevent invalid input.
 public static class IpValidator

