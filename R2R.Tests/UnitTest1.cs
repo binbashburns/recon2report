@@ -1,4 +1,7 @@
 ﻿using Xunit;
+using R2R.Core.Domain;
+using R2R.Core.Parsing;
+using R2R.Core.Rules;
 
 public class NmapParserTests
 {
@@ -23,23 +26,103 @@ public class NmapParserTests
     }
 }
 
-public class NextStepsTests
+public class MarkdownParserTests
 {
     [Fact]
-    public void SuggestsWebEnumForWebPorts()
+    public void ParsesSimpleMarkdownIntoRuleSet()
     {
-        var ports = new[]{ new OpenPort(80,"tcp","http","Apache") };
-        var tips = NextStepsSuggester.Suggest("10.10.10.10", "Linux", ports).ToList();
-        Assert.Contains(tips, t => t.Area=="Web" && t.Tip.Contains("http-enum"));
+        var markdown = """
+        # Test Rules
+        
+        ## Scan network >>> Vulnerable host
+        - `nmap -sP <ip>`
+        - `nxc smb <ip_range>`
+        
+        ## Anonymous SMB >>> Username
+        - `smbclient -L //<ip> -N`
+        """;
+
+        var ruleSet = MarkdownRuleLoader.ParseMarkdown("test", markdown);
+        
+        Assert.Equal("test", ruleSet.Id);
+        Assert.Equal(2, ruleSet.Vectors.Count);
+        
+        var scanVector = ruleSet.Vectors.First(v => v.Name == "Scan network");
+        Assert.NotNull(scanVector);
+        Assert.Contains("Vulnerable host", scanVector.PossibleOutcomes.Select(o => o.DisplayName));
+        Assert.True(scanVector.Commands.Count >= 2);
+    }
+}
+
+public class RuleEngineTests
+{
+    [Fact]
+    public void EvaluatesNoCredsStateAndReturnsScanVectors()
+    {
+        var markdown = """
+        # No Credentials
+        
+        ## Scan network >>> Vulnerable host
+        - `nmap -sP <ip>`
+        
+        ## Anonymous SMB >>> Username
+        - `smbclient -L //<ip> -N`
+        """;
+
+        var ruleSet = MarkdownRuleLoader.ParseMarkdown("no_creds", markdown);
+        
+        // Debug: verify the parser extracted vectors correctly
+        Assert.NotEmpty(ruleSet.Vectors);
+        Assert.Equal("nocreds", ruleSet.InitialState);
+        
+        var engine = new RuleEngine(new List<RuleSet> { ruleSet });
+
+        var state = new AttackState(
+            CurrentPhase: "nocreds",  // Match what parser generates
+            AcquiredItems: new List<string>(),
+            OpenPorts: new List<int>(),
+            Services: new List<string>(),
+            TargetOS: null
+        );
+
+        var vectors = engine.Evaluate(state);
+        
+        Assert.NotEmpty(vectors);
+        Assert.Contains(vectors, v => v.Name.Contains("Scan network"));
     }
 
     [Fact]
-    public void SuggestsLinuxOrWindowsPrivesc()
+    public void FiltersVectorsByOpenPorts()
     {
-        var none = Enumerable.Empty<OpenPort>();
-        var linux = NextStepsSuggester.Suggest("10.10.10.10", "Linux", none);
-        var win   = NextStepsSuggester.Suggest("192.168.1.1", "Windows", none);
-        Assert.Contains(linux, t => t.Area=="PrivEsc" && t.Tip.Contains("linpeas"));
-        Assert.Contains(win,   t => t.Area=="PrivEsc" && t.Tip.Contains("winPEAS"));
+        var markdown = """
+        # No Credentials
+        
+        ## Scan network
+        - `nmap -sP <ip>`
+        
+        ## Anonymous SMB access
+        - `smbclient -L //<ip> -N`
+        """;
+
+        var ruleSet = MarkdownRuleLoader.ParseMarkdown("no_creds", markdown);
+        var engine = new RuleEngine(new List<RuleSet> { ruleSet });
+
+        var state = new AttackState(
+            CurrentPhase: "nocreds",  // Match what parser generates
+            AcquiredItems: new List<string>(),
+            OpenPorts: new List<int> { 445, 139 },
+            Services: new List<string>(),
+            TargetOS: null
+        );
+
+        // First get all vectors that apply to this state
+        var allVectors = engine.Evaluate(state);
+        Assert.NotEmpty(allVectors);
+        
+        // Then filter by ports
+        var vectors = engine.GetVectorsForPorts(state, new List<int> { 445 });
+        
+        // Should prioritize SMB-related vectors when port 445 is open
+        Assert.Contains(vectors, v => v.Name.Contains("SMB", StringComparison.OrdinalIgnoreCase));
     }
 }

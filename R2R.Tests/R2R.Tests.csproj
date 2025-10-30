@@ -20,6 +20,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\R2R.Api\R2R.Api.csproj" />
+    <ProjectReference Include="..\R2R.Core.Domain\R2R.Core.Domain.csproj" />
+    <ProjectReference Include="..\R2R.Core.Parsing\R2R.Core.Parsing.csproj" />
+    <ProjectReference Include="..\R2R.Core.Rules\R2R.Core.Rules.csproj" />
   </ItemGroup>
 
 </Project>
