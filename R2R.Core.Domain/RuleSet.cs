@@ -8,5 +8,6 @@ public record RuleSet(
     string Id,                      // Unique identifier (filename without extension, e.g., "no_creds")
     string Name,                    // Display name (e.g., "No Credentials")
     string InitialState,            // Starting state for this ruleset (e.g., "no_creds")
+    string Phase,                   // Penetration testing phase (e.g., "reconnaissance", "lateral_movement", "always")
     List<AttackVector> Vectors      // All attack vectors in this ruleset
 );

