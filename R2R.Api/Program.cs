@@ -1,4 +1,7 @@
 using System.Text.RegularExpressions;
+using R2R.Core.Domain;
+using R2R.Core.Parsing;
+using R2R.Core.Rules;
 
 // Bootstraps the minimal API host and exposes Swagger for interactive testing.
 var builder = WebApplication.CreateBuilder(args);
@@ -6,6 +9,51 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
+
+// Load rule sets at startup
+var ruleSets = new List<RuleSet>();
+var docsPath = Path.Combine(Directory.GetCurrentDirectory(), "..", "docs");
+Console.WriteLine($"Looking for docs at: {docsPath}");
+Console.WriteLine($"Docs directory exists: {Directory.Exists(docsPath)}");
+
+if (Directory.Exists(docsPath))
+{
+    var noCredsFile = Path.Combine(docsPath, "no_creds.md");
+    Console.WriteLine($"Looking for file: {noCredsFile}");
+    Console.WriteLine($"File exists: {File.Exists(noCredsFile)}");
+    
+    if (File.Exists(noCredsFile))
+    {
+        try
+        {
+            var ruleSet = MarkdownRuleLoader.LoadFromFile(noCredsFile);
+            ruleSets.Add(ruleSet);
+            Console.WriteLine($"✓ Loaded ruleset: {ruleSet.Name} with {ruleSet.Vectors.Count} attack vectors");
+            
+            // Debug: print first few vectors
+            foreach (var vector in ruleSet.Vectors.Take(3))
+            {
+                Console.WriteLine($"  - Vector: {vector.Name} (Prerequisites: {string.Join(", ", vector.Prerequisites)})");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"⚠ Failed to load no_creds.md: {ex.Message}");
+            Console.WriteLine($"Stack trace: {ex.StackTrace}");
+        }
+    }
+    else
+    {
+        Console.WriteLine("⚠ no_creds.md not found");
+    }
+}
+else
+{
+    Console.WriteLine("⚠ docs directory not found");
+}
+
+var ruleEngine = new RuleEngine(ruleSets);
+Console.WriteLine($"Rule engine initialized with {ruleSets.Count} ruleset(s)");
 
 // Enable Swagger UI
 app.UseSwagger();
@@ -91,12 +139,86 @@ app.MapPost("/nmap/parse", (ParseRequest req) => {
     return Results.Ok(parsed);
 });
 
-// ---- Helper: Next-step suggestions from OS + ports ----
-// Converts the OS + open ports into actionable enumeration recommendations.
-app.MapPost("/next-steps", (NextStepsRequest req) => {
-    var steps = NextStepsSuggester.Suggest(req.Ip, req.Os, req.Ports ?? []);
-    return Results.Ok(steps);
+// ---- Rule Engine: Suggest attack paths based on current state ----
+// Uses loaded markdown rule sets to suggest applicable attack vectors
+app.MapPost("/attack-paths/suggest", (AttackPathRequest req) => {
+    // Normalize the phase to match what the parser generates (removes underscores)
+    var normalizedPhase = (req.CurrentPhase ?? "no_creds")
+        .ToLowerInvariant()
+        .Replace("_", "")
+        .Replace("-", "")
+        .Trim();
+    
+    var state = new AttackState(
+        CurrentPhase: normalizedPhase,
+        AcquiredItems: req.AcquiredItems ?? new List<string>(),
+        OpenPorts: req.OpenPorts ?? new List<int>(),
+        Services: req.Services ?? new List<string>(),
+        TargetOS: req.TargetOS
+    );
+
+    // Get all applicable vectors
+    var vectors = ruleEngine.Evaluate(state);
+
+    // Optionally filter by ports if provided
+    if (req.OpenPorts?.Any() == true)
+    {
+        var portVectors = ruleEngine.GetVectorsForPorts(state, req.OpenPorts);
+        vectors = vectors.Intersect(portVectors).ToList();
+    }
+
+    // Optionally filter by services if provided
+    if (req.Services?.Any() == true)
+    {
+        var serviceVectors = ruleEngine.GetVectorsForServices(state, req.Services);
+        vectors = vectors.Intersect(serviceVectors).ToList();
+    }
+
+    return Results.Ok(new {
+        CurrentPhase = req.CurrentPhase ?? "no_creds",
+        TargetContext = new {
+            TargetIp = req.TargetIp,
+            DomainName = req.DomainName,
+            IpRange = req.IpRange
+        },
+        ApplicableVectors = vectors.Select(v => new {
+            v.Id,
+            v.Name,
+            v.Prerequisites,
+            PossibleOutcomes = v.PossibleOutcomes.Select(o => o.DisplayName).ToList(),
+            Commands = v.Commands.Select(c => new { 
+                c.Tool, 
+                RawSyntax = c.Syntax,
+                // Substitute variables in command syntax
+                ReadyCommand = SubstituteVariables(c.Syntax, req.TargetIp, req.DomainName, req.IpRange)
+            }).ToList()
+        }).ToList()
+    });
 });
+
+// Helper function to substitute common variables in command templates
+static string SubstituteVariables(string template, string? targetIp, string? domain, string? ipRange)
+{
+    var result = template;
+    
+    // Substitute variables (case-insensitive)
+    if (!string.IsNullOrWhiteSpace(targetIp))
+    {
+        result = Regex.Replace(result, @"<ip>|<dc_ip>|<target>", targetIp, RegexOptions.IgnoreCase);
+    }
+    
+    if (!string.IsNullOrWhiteSpace(domain))
+    {
+        result = Regex.Replace(result, @"<domain>|<domain_name>", domain, RegexOptions.IgnoreCase);
+    }
+    
+    if (!string.IsNullOrWhiteSpace(ipRange))
+    {
+        result = Regex.Replace(result, @"<ip_range>", ipRange, RegexOptions.IgnoreCase);
+    }
+    
+    return result;
+}
 
 // Activates the ASP.NET Core request pipeline.
 app.Run();
@@ -104,7 +226,16 @@ app.Run();
 // Request DTOs exposed to the front-end for helper endpoints.
 public record SuggestRequest(string Ip, string Os); // Os: "Windows"|"Linux"
 public record ParseRequest(string? NmapOutput);
-public record NextStepsRequest(string Ip, string Os, List<OpenPort>? Ports);
+public record AttackPathRequest(
+    string? CurrentPhase,       // e.g., "no_creds", "user_found"
+    List<string>? AcquiredItems, // e.g., ["username", "hash"]
+    List<int>? OpenPorts,        // e.g., [445, 139, 88]
+    List<string>? Services,      // e.g., ["smb", "ldap"]
+    string? TargetOS,            // e.g., "Windows", "Linux"
+    string? TargetIp,            // Target IP for variable substitution
+    string? DomainName,          // Domain name for variable substitution
+    string? IpRange              // IP range for variable substitution
+);
 public record Session(string Id, string Name);
 public record Target(string Id, string SessionId, string Ip, string Os, List<OpenPort>? Ports = null);
 
@@ -183,49 +314,6 @@ public static class NmapParser {
             .ToList();
     }
 }
-
-// Suggests playbook steps by matching ports/OS against a curated checklist.
-public static class NextStepsSuggester {
-    public static IEnumerable<Suggestion> Suggest(string ip, string os, IEnumerable<OpenPort> ports)
-    {
-        // Use a set for constant-time checks when matching well-known services.
-        var set = ports.Select(p => p.Number).ToHashSet();
-
-        // General
-        yield return new("General", "Take note of service versions; search for matching exploits. Prefer non-MSF first.");
-        // Web
-        foreach (var p in ports.Where(p => new[] {80, 443, 8080, 8443}.Contains(p.Number))) {
-            yield return new("Web", $"http enum (NSE): nmap --script http-enum,http-title -p {p.Number} {ip}");
-            yield return new("Web", $"dir brute: gobuster dir -u http://{ip}:{p.Number} -w <wordlist>");
-            yield return new("Web", $"tech: whatweb http://{ip}:{p.Number}");
-        }
-        // SMB
-        if (set.Contains(445) || set.Contains(139)) {
-            yield return new("SMB", $"enum: smbclient -L //{ip} -N");
-            yield return new("SMB", $"enum: enum4linux-ng -A {ip}");
-        }
-        // SSH
-        if (set.Contains(22)) {
-            yield return new("SSH", $"ssh-audit {ip}  # check ciphers/banner");
-        }
-        // RDP
-        if (set.Contains(3389)) {
-            yield return new("RDP", $"nmap --script rdp-enum-encryption -p3389 {ip}");
-        }
-        // DNS
-        if (set.Contains(53)) {
-            yield return new("DNS", $"dig axfr @{ip} <domain>  # (labs only) try zone transfer");
-        }
-        // PrivEsc checklists (textual nudge only)
-        if (os.Equals("Linux", StringComparison.OrdinalIgnoreCase)) {
-            yield return new("PrivEsc", "Run linpeas; check SUID, cron, sudo -l, capabilities, Docker group, NFS.");
-        } else {
-            yield return new("PrivEsc", "Run winPEAS; check unquoted service paths, AlwaysInstallElevated, UAC, privileges.");
-        }
-    }
-}
-// Lightweight DTO returned from `/next-steps`.
-public record Suggestion(string Area, string Tip);
 
 // Validates IP addresses and CIDR notation to prevent invalid input.
 public static class IpValidator
