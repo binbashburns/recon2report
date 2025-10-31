@@ -54,10 +54,11 @@ TestResult.xml
 nunit-*.xml
 
 # CLI Outputs
-nmap_quick.txt
-nmap_standard.txt
-nmap_all_ports.txt
-nmap_udp.txt
+nmap_quick.xml
+nmap_standard.xml
+nmap_all_ports.xml
+nmap_udp.xml
+nmap_custom.xml
 
 # Macs are weird
 .DS_Store

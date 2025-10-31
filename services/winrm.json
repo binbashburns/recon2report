@@ -1,0 +1,59 @@
+{
+  "service": "WinRM",
+  "description": "Windows Remote Management protocol",
+  "ports": [5985, 5986],
+  "serviceNames": ["winrm", "wsman"],
+  "targetOs": ["Windows"],
+  "vectors": [
+    {
+      "id": "winrm_enumeration",
+      "name": "WinRM Service Enumeration",
+      "phase": "reconnaissance",
+      "prerequisites": [],
+      "description": "Enumerate WinRM service",
+      "commands": [
+        {
+          "tool": "nmap",
+          "syntax": "nmap -p 5985,5986 --script http-methods,http-headers <target>",
+          "description": "WinRM enumeration"
+        }
+      ],
+      "outcomes": ["winrm_enabled"]
+    },
+    {
+      "id": "winrm_password_spray",
+      "name": "WinRM Password Spraying",
+      "phase": "credential_access",
+      "prerequisites": ["username"],
+      "description": "Spray passwords against WinRM",
+      "commands": [
+        {
+          "tool": "nxc",
+          "syntax": "nxc winrm <target> -u <user> -p <password_list>",
+          "description": "NetExec WinRM bruteforce"
+        }
+      ],
+      "outcomes": ["valid_credentials", "winrm_access"]
+    },
+    {
+      "id": "winrm_remote_exec",
+      "name": "WinRM Remote Command Execution",
+      "phase": "lateral_movement",
+      "prerequisites": ["valid_credentials"],
+      "description": "Execute commands via WinRM",
+      "commands": [
+        {
+          "tool": "evil-winrm",
+          "syntax": "evil-winrm -i <target> -u <user> -p <password>",
+          "description": "Interactive WinRM shell"
+        },
+        {
+          "tool": "nxc",
+          "syntax": "nxc winrm <target> -u <user> -p <password> -x <command>",
+          "description": "Execute single command via WinRM"
+        }
+      ],
+      "outcomes": ["shell", "code_execution"]
+    }
+  ]
+}

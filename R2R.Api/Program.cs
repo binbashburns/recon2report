@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using System.Xml.Linq;
 using R2R.Core.Domain;
 using R2R.Core.Parsing;
 using R2R.Core.Rules;
@@ -10,52 +11,34 @@ builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
-// Load rule sets at startup
-var ruleSets = new List<RuleSet>();
-var docsPath = Path.Combine(Directory.GetCurrentDirectory(), "..", "docs");
-Console.WriteLine($"Looking for attack path files in: {docsPath}");
+// Load service-based rule sets at startup
+var servicesPath = Path.Combine(Directory.GetCurrentDirectory(), "..", "services");
+Console.WriteLine($"Looking for service files in: {servicesPath}");
 
-if (Directory.Exists(docsPath))
+var serviceRuleSets = new List<ServiceRuleSet>();
+
+if (Directory.Exists(servicesPath))
 {
-    // Load all markdown files from docs directory
-    var markdownFiles = Directory.GetFiles(docsPath, "*.md", SearchOption.TopDirectoryOnly).ToList();
+    serviceRuleSets = ServiceRuleLoader.LoadFromDirectory(servicesPath);
+    Console.WriteLine($"Loaded {serviceRuleSets.Count} service rule set(s)");
     
-    Console.WriteLine($"Found {markdownFiles.Count} attack path file(s)");
-    
-    foreach (var mdFile in markdownFiles)
+    foreach (var svc in serviceRuleSets)
     {
-        try
-        {
-            var ruleSet = MarkdownRuleLoader.LoadFromFile(mdFile);
-            ruleSets.Add(ruleSet);
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine($"  ✓ {Path.GetFileName(mdFile)}: {ruleSet.Name} - Phase: {ruleSet.Phase} ({ruleSet.Vectors.Count} vectors)");
-            Console.ResetColor();
-        }
-        catch (Exception ex)
-        {
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"  ✗ {Path.GetFileName(mdFile)}: {ex.Message}");
-            Console.ResetColor();
-        }
-    }
-    
-    if (!ruleSets.Any())
-    {
-        Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine("No attack path files loaded. Add .md files to /docs directory.");
+        Console.ForegroundColor = ConsoleColor.Green;
+        var portList = svc.Ports.Any() ? string.Join(",", svc.Ports) : "N/A";
+        Console.WriteLine($"  ✓ {svc.Service}: {svc.Vectors.Count} vectors (Ports: {portList})");
         Console.ResetColor();
     }
 }
 else
 {
     Console.ForegroundColor = ConsoleColor.Yellow;
-    Console.WriteLine($"Docs directory not found at: {docsPath}");
+    Console.WriteLine($"Services directory not found at: {servicesPath}");
     Console.ResetColor();
 }
 
-var ruleEngine = new RuleEngine(ruleSets);
-Console.WriteLine($"Rule engine initialized with {ruleSets.Count} ruleset(s)\n");
+var ruleEngine = new ServiceRuleEngine(serviceRuleSets);
+Console.WriteLine($"\nRule engine initialized with {serviceRuleSets.Count} service(s)\n");
 
 // Enable Swagger UI
 app.UseSwagger();
@@ -77,6 +60,28 @@ app.MapPost("/sessions", (Session s) =>
 // Quick fetch for session metadata by identifier.
 app.MapGet("/sessions/{id}", (string id) =>
     db.Sessions.TryGetValue(id, out var s) ? Results.Ok(s) : Results.NotFound());
+
+// Get all targets associated with a session
+app.MapGet("/sessions/{id}/targets", (string id) => {
+    if (!db.Sessions.ContainsKey(id)) return Results.NotFound();
+    
+    var sessionTargets = db.Targets.Values
+        .Where(t => t.SessionId == id)
+        .Select(t => new {
+            t.Id,
+            t.Ip,
+            t.Os,
+            PortCount = t.Ports?.Count ?? 0,
+            HasPorts = t.Ports?.Any() == true
+        })
+        .ToList();
+    
+    return Results.Ok(new {
+        SessionId = id,
+        TargetCount = sessionTargets.Count,
+        Targets = sessionTargets
+    });
+});
 
 // Allows the UI to discard an entire engagement quickly.
 app.MapDelete("/sessions/{id}", (string id) => db.Sessions.Remove(id) ? Results.NoContent() : Results.NotFound());
@@ -111,22 +116,80 @@ app.MapDelete("/targets/{id}", (string id) => db.Targets.Remove(id) ? Results.No
 
 // ---- Scan Results Management ----
 // Upload and store parsed Nmap scan results for a target
+// If multiple hosts are detected, creates a separate target for each
 app.MapPost("/targets/{id}/scan", (string id, ParseRequest req) => {
     if (!db.Targets.TryGetValue(id, out var target)) return Results.NotFound();
-    var parseResult = NmapParser.ParseFull(req.NmapOutput ?? "");
-    db.Targets[id] = target with { Ports = parseResult.Ports };
     
-    return Results.Ok(new { 
-        TargetId = id, 
-        PortsDetected = parseResult.Ports.Count, 
-        Ports = parseResult.Ports,
-        DiscoveredInfo = new {
-            parseResult.DomainName,
-            parseResult.ComputerName,
-            parseResult.FQDN,
-            parseResult.DetectedOS
+    var hosts = NmapParser.ParseMultipleHosts(req.NmapOutput ?? "");
+    
+    // If multiple hosts found, create separate targets for each
+    if (hosts.Count > 1)
+    {
+        var createdTargets = new List<object>();
+        
+        foreach (var host in hosts)
+        {
+            var newTargetId = Guid.NewGuid().ToString("n");
+            var detectedOs = host.DetectedOS ?? target.Os; // Use detected OS or fall back to original
+            
+            var newTarget = new Target(
+                Id: newTargetId,
+                SessionId: target.SessionId,
+                Ip: host.IpAddress,
+                Os: detectedOs,
+                Ports: host.Ports
+            );
+            
+            db.Targets[newTargetId] = newTarget;
+            
+            createdTargets.Add(new {
+                TargetId = newTargetId,
+                IpAddress = host.IpAddress,
+                Hostname = host.Hostname,
+                PortsDetected = host.Ports.Count,
+                Ports = host.Ports,
+                DiscoveredInfo = new {
+                    host.DomainName,
+                    host.ComputerName,
+                    host.FQDN,
+                    DetectedOS = host.DetectedOS
+                }
+            });
         }
-    });
+        
+        return Results.Ok(new {
+            Message = $"Multiple hosts detected. Created {hosts.Count} separate targets.",
+            HostCount = hosts.Count,
+            OriginalTargetId = id,
+            DiscoveredTargets = createdTargets
+        });
+    }
+    
+    // Single host - update the existing target
+    var singleHost = hosts.FirstOrDefault();
+    if (singleHost != null)
+    {
+        var detectedOs = singleHost.DetectedOS ?? target.Os;
+        db.Targets[id] = target with { 
+            Ip = singleHost.IpAddress, 
+            Os = detectedOs,
+            Ports = singleHost.Ports 
+        };
+        
+        return Results.Ok(new { 
+            TargetId = id, 
+            PortsDetected = singleHost.Ports.Count, 
+            Ports = singleHost.Ports,
+            DiscoveredInfo = new {
+                singleHost.DomainName,
+                singleHost.ComputerName,
+                singleHost.FQDN,
+                DetectedOS = singleHost.DetectedOS
+            }
+        });
+    }
+    
+    return Results.BadRequest("No hosts found in scan output");
 });
 
 // Retrieve stored scan results for a target
@@ -144,16 +207,8 @@ app.MapPost("/nmap/suggest", (SuggestRequest req) => {
     return Results.Ok(cmds);
 });
 
-// ---- Helper: Parse pasted Nmap normal output ----
-// Converts raw Nmap output into structured `OpenPort` records.
-// Note: This is stateless. Use POST /targets/{id}/scan to save results.
-app.MapPost("/nmap/parse", (ParseRequest req) => {
-    var parsed = NmapParser.Parse(req.NmapOutput ?? "");
-    return Results.Ok(parsed);
-});
-
 // ---- Rule Engine: Suggest attack paths based on current state ----
-// Uses loaded markdown rule sets to suggest applicable attack vectors
+// Uses loaded service rule sets to suggest applicable attack vectors
 app.MapPost("/attack-paths/suggest", (AttackPathRequest req) => {
     var state = new AttackState(
         CurrentPhase: req.CurrentPhase ?? "reconnaissance",
@@ -165,13 +220,23 @@ app.MapPost("/attack-paths/suggest", (AttackPathRequest req) => {
 
     // Get all applicable vectors for current phase (includes "always" phase)
     var allVectors = ruleEngine.Evaluate(state).ToList();
+    
+    // Try to get IP range from session if not provided in request
+    var ipRange = req.IpRange;
+    if (string.IsNullOrWhiteSpace(ipRange) && !string.IsNullOrWhiteSpace(req.SessionId))
+    {
+        if (db.Sessions.TryGetValue(req.SessionId, out var session))
+        {
+            ipRange = session.IpRange;
+        }
+    }
 
     return Results.Ok(new {
         CurrentPhase = req.CurrentPhase ?? "reconnaissance",
         TargetContext = new {
             TargetIp = req.TargetIp,
             DomainName = req.DomainName,
-            IpRange = req.IpRange
+            IpRange = ipRange
         },
         ApplicableVectors = allVectors.Select(v => new {
             v.Id,
@@ -181,8 +246,8 @@ app.MapPost("/attack-paths/suggest", (AttackPathRequest req) => {
             Commands = v.Commands.Select(c => new { 
                 c.Tool, 
                 RawSyntax = c.Syntax,
-                // Substitute variables in command syntax
-                ReadyCommand = SubstituteVariables(c.Syntax, req.TargetIp, req.DomainName, req.IpRange)
+                // Substitute variables in command syntax, including open ports
+                ReadyCommand = SubstituteVariables(c.Syntax, req.TargetIp, req.DomainName, ipRange, req.OpenPorts)
             }).ToList()
         }).ToList()
     });
@@ -190,17 +255,7 @@ app.MapPost("/attack-paths/suggest", (AttackPathRequest req) => {
 
 // Get ALL vectors for a phase (no prerequisite filtering) - for reference/cheatsheet mode
 app.MapGet("/attack-paths/phase/{phase}", (string phase) => {
-    var state = new AttackState(
-        CurrentPhase: phase,
-        AcquiredItems: new List<string>(),
-        OpenPorts: new List<int>(),
-        Services: new List<string>(),
-        TargetOS: null // Don't filter by OS for raw output
-    );
-    
-    // Get matching rulesets without prerequisite filtering
-    var matchingRuleSets = ruleEngine.GetRuleSetsForPhase(phase);
-    var allVectors = matchingRuleSets.SelectMany(rs => rs.Vectors).ToList();
+    var allVectors = ruleEngine.GetVectorsForPhase(phase);
     
     return Results.Ok(new {
         Phase = phase,
@@ -218,16 +273,19 @@ app.MapGet("/attack-paths/phase/{phase}", (string phase) => {
     });
 });
 
-// Debug endpoint to see what's being filtered
-app.MapGet("/debug/vectors", () => {
+// Debug endpoint to see what services are loaded
+app.MapGet("/debug/services", () => {
+    var allServices = ruleEngine.GetAllServices();
     return Results.Ok(new {
-        TotalRuleSets = ruleSets.Count,
-        RuleSets = ruleSets.Select(rs => new {
-            rs.Id,
-            rs.Name,
-            rs.Phase,
-            VectorCount = rs.Vectors.Count,
-            Vectors = rs.Vectors.Select(v => new {
+        TotalServices = allServices.Count,
+        Services = allServices.Select(svc => new {
+            svc.Service,
+            svc.Description,
+            Ports = svc.Ports,
+            ServiceNames = svc.ServiceNames,
+            TargetOs = svc.TargetOs,
+            VectorCount = svc.Vectors.Count,
+            Vectors = svc.Vectors.Select(v => new {
                 v.Name,
                 v.Prerequisites,
                 CommandCount = v.Commands.Count
@@ -237,7 +295,7 @@ app.MapGet("/debug/vectors", () => {
 });
 
 // Helper function to substitute common variables in command templates
-static string SubstituteVariables(string template, string? targetIp, string? domain, string? ipRange)
+static string SubstituteVariables(string template, string? targetIp, string? domain, string? ipRange, List<int>? openPorts = null)
 {
     var result = template;
     
@@ -257,6 +315,13 @@ static string SubstituteVariables(string template, string? targetIp, string? dom
         result = Regex.Replace(result, @"<ip_range>", ipRange, RegexOptions.IgnoreCase);
     }
     
+    // Substitute <port> with the first detected open port (or comma-separated list if multiple)
+    if (openPorts != null && openPorts.Any())
+    {
+        var portString = openPorts.Count == 1 ? openPorts[0].ToString() : string.Join(",", openPorts);
+        result = Regex.Replace(result, @"<port>", portString, RegexOptions.IgnoreCase);
+    }
+    
     return result;
 }
 
@@ -274,9 +339,10 @@ public record AttackPathRequest(
     string? TargetOS,            // e.g., "Windows", "Linux"
     string? TargetIp,            // Target IP for variable substitution
     string? DomainName,          // Domain name for variable substitution
-    string? IpRange              // IP range for variable substitution
+    string? IpRange,             // IP range for variable substitution
+    string? SessionId            // Session ID to retrieve stored IP range
 );
-public record Session(string Id, string Name);
+public record Session(string Id, string Name, string? IpRange = null);
 public record Target(string Id, string SessionId, string Ip, string Os, List<OpenPort>? Ports = null);
 
 // Tiny persistence wrapper so endpoints can share mutable state.
@@ -292,30 +358,30 @@ public static class NmapCommandBuilder {
     {
         // Quick discovery scan
         yield return new("Quick Scan (Top 100 ports)",
-            $"nmap --top-ports 100 -oN nmap_quick.txt {ip}",
+            $"nmap --top-ports 100 -oX nmap_quick.xml {ip}",
             "Fast discovery (~30 seconds). Great for initial enumeration of most common services.");
 
         // Standard recommended scan
         yield return new("Standard Scan (Recommended)",
-            $"nmap -sV -sC -oN nmap_standard.txt {ip}",
+            $"nmap -sV -sC -oX nmap_standard.xml {ip}",
             "Top 1000 ports with version detection and default scripts (~2-5 minutes). Best starting point.");
 
         // Full TCP scan (with better settings)
         var fullScanPrefix = os.Equals("Windows", StringComparison.OrdinalIgnoreCase) ? "" : "sudo ";
         yield return new("Full TCP Scan",
-            $"{fullScanPrefix}nmap -sS -p- --min-rate 5000 -T4 -oN nmap_all_ports.txt {ip}",
-            "Comprehensive scan of all 65,535 TCP ports (~20-40 minutes). Use sudo for faster SYN scan on Linux.");
+            $"{fullScanPrefix}nmap -sS -p- --min-rate 5000 -T4 -oX nmap_all_ports.xml {ip}",
+            "Comprehensive scan of all 65,535 TCP ports (~20-40 minutes). Use sudo for faster SYN scan on Linux/Unix.");
 
         // UDP scan
         yield return new("Top UDP Ports",
-            $"sudo nmap -sU --top-ports 100 -oN nmap_udp.txt {ip}",
+            $"sudo nmap -sU --top-ports 100 -oX nmap_udp.xml {ip}",
             "UDP is slower; scan top 100 ports for DNS/SNMP/DHCP/NTP (~5-10 minutes).");
 
-        // OS-specific post-scan enumeration notes
+        // OS-specific post-scan enumeration notes (only if OS is known)
         if (os.Equals("Windows", StringComparison.OrdinalIgnoreCase)) {
             yield return new("Windows Enumeration Tips", "N/A",
                 "After scan: Check SMB (445) with smbclient/enum4linux, RDP (3389) cipher strength, WinRM (5985/5986).");
-        } else {
+        } else if (os.Equals("Linux", StringComparison.OrdinalIgnoreCase)) {
             yield return new("Linux Enumeration Tips", "N/A",
                 "After scan: Run ssh-audit on port 22, gobuster on web ports, check for NFS (2049), exploit-db searches.");
         }
@@ -327,81 +393,157 @@ public record OpenPort(int Number, string Protocol, string? Service, string? Ver
 
 // Turns unstructured Nmap text into strongly typed port data.
 public static class NmapParser {
-    // Parses typical "PORT   STATE SERVICE VERSION" lines from nmap normal output
-    static readonly Regex PortLine = new(@"^(?<port>\d{1,5})\/(?<proto>tcp|udp)\s+(?<state>open|filtered|closed)\s+(?<service>\S+)(\s+(?<version>.+))?$",
-                                         RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
-    public static List<OpenPort> Parse(string output)
+    /// <summary>
+    /// Parses Nmap XML output that may contain multiple hosts.
+    /// Returns a list of HostScanResult, one per discovered host with open ports.
+    /// </summary>
+    public static List<HostScanResult> ParseMultipleHosts(string xmlOutput)
     {
-        return ParseFull(output).Ports;
-    }
-    
-    public static NmapParseResult ParseFull(string output)
-    {
-        var ports = new List<OpenPort>();
-        string? domainName = null;
-        string? computerName = null;
-        string? fqdn = null;
-        string? detectedOS = null;
-
-        foreach (var raw in output.Split('\n')) {
-            var line = raw.Trim();
+        var hosts = new List<HostScanResult>();
+        xmlOutput = xmlOutput?.Trim() ?? "";
+        
+        if (string.IsNullOrWhiteSpace(xmlOutput))
+            return hosts;
+        
+        try
+        {
+            var doc = XDocument.Parse(xmlOutput);
+            var hostElements = doc.Descendants("host");
             
-            // Parse port lines
-            var m = PortLine.Match(line);
-            if (m.Success) {
-                if (!int.TryParse(m.Groups["port"].Value, out var port) || port < 1 || port > 65535) continue;
-                var proto   = m.Groups["proto"].Value;
-                var state   = m.Groups["state"].Value;
-                if (!string.Equals(state, "open", StringComparison.OrdinalIgnoreCase)) continue;
-                var service = m.Groups["service"].Value;
-                var version = m.Groups["version"].Success ? m.Groups["version"].Value.Trim() : null;
-                ports.Add(new OpenPort(port, proto, string.IsNullOrWhiteSpace(service) ? null : service, version));
-                continue;
-            }
-            
-            // Extract domain info from smb-os-discovery
-            if (line.Contains("Domain name:", StringComparison.OrdinalIgnoreCase))
+            foreach (var hostElement in hostElements)
             {
-                var parts = line.Split(':', 2);
-                if (parts.Length == 2 && !string.IsNullOrWhiteSpace(parts[1]))
-                    domainName = parts[1].Trim();
-            }
-            
-            if (line.Contains("Computer name:", StringComparison.OrdinalIgnoreCase))
-            {
-                var parts = line.Split(':', 2);
-                if (parts.Length == 2 && !string.IsNullOrWhiteSpace(parts[1]))
-                    computerName = parts[1].Trim();
-            }
-            
-            if (line.Contains("FQDN:", StringComparison.OrdinalIgnoreCase))
-            {
-                var parts = line.Split(':', 2);
-                if (parts.Length == 2 && !string.IsNullOrWhiteSpace(parts[1]))
-                    fqdn = parts[1].Trim();
-            }
-            
-            if (line.Contains("|   OS:", StringComparison.OrdinalIgnoreCase))
-            {
-                var parts = line.Split(':', 2);
-                if (parts.Length == 2 && !string.IsNullOrWhiteSpace(parts[1]))
-                    detectedOS = parts[1].Trim();
+                // Get host status - skip if down
+                var statusElement = hostElement.Element("status");
+                if (statusElement?.Attribute("state")?.Value != "up")
+                    continue;
+                
+                // Get IP address
+                var addressElement = hostElement.Descendants("address")
+                    .FirstOrDefault(a => a.Attribute("addrtype")?.Value == "ipv4");
+                if (addressElement == null)
+                    continue;
+                    
+                var ipAddress = addressElement.Attribute("addr")?.Value;
+                if (string.IsNullOrWhiteSpace(ipAddress))
+                    continue;
+                
+                // Get hostname(s)
+                var hostnameElement = hostElement.Descendants("hostname").FirstOrDefault();
+                var hostname = hostnameElement?.Attribute("name")?.Value;
+                
+                // Parse open ports
+                var ports = new List<OpenPort>();
+                var portElements = hostElement.Descendants("port")
+                    .Where(p => p.Element("state")?.Attribute("state")?.Value == "open");
+                
+                foreach (var portElement in portElements)
+                {
+                    var portId = portElement.Attribute("portid")?.Value;
+                    var protocol = portElement.Attribute("protocol")?.Value ?? "tcp";
+                    
+                    if (!int.TryParse(portId, out var portNumber) || portNumber < 1 || portNumber > 65535)
+                        continue;
+                    
+                    var serviceElement = portElement.Element("service");
+                    var serviceName = serviceElement?.Attribute("name")?.Value;
+                    var product = serviceElement?.Attribute("product")?.Value;
+                    var version = serviceElement?.Attribute("version")?.Value;
+                    
+                    // Build version string from product and version
+                    string? versionString = null;
+                    if (!string.IsNullOrWhiteSpace(product) && !string.IsNullOrWhiteSpace(version))
+                        versionString = $"{product} {version}";
+                    else if (!string.IsNullOrWhiteSpace(product))
+                        versionString = product;
+                    else if (!string.IsNullOrWhiteSpace(version))
+                        versionString = version;
+                    
+                    ports.Add(new OpenPort(
+                        portNumber,
+                        protocol,
+                        string.IsNullOrWhiteSpace(serviceName) ? null : serviceName,
+                        versionString
+                    ));
+                }
+                
+                // Skip hosts with no open ports
+                if (!ports.Any())
+                    continue;
+                
+                // Extract OS information
+                string? detectedOS = null;
+                var osElement = hostElement.Descendants("osmatch").FirstOrDefault();
+                if (osElement != null)
+                {
+                    var osName = osElement.Attribute("name")?.Value;
+                    var accuracy = osElement.Attribute("accuracy")?.Value;
+                    if (!string.IsNullOrWhiteSpace(osName))
+                        detectedOS = accuracy != null ? $"{osName} ({accuracy}% accuracy)" : osName;
+                }
+                
+                // Extract SMB/NetBIOS information from script output
+                string? domainName = null;
+                string? computerName = null;
+                string? fqdn = null;
+                
+                var scripts = hostElement.Descendants("script");
+                foreach (var script in scripts)
+                {
+                    var scriptId = script.Attribute("id")?.Value;
+                    var output = script.Attribute("output")?.Value ?? "";
+                    
+                    if (scriptId == "smb-os-discovery" || scriptId == "smb2-capabilities")
+                    {
+                        // Parse script output for domain/computer names
+                        foreach (var line in output.Split('\n'))
+                        {
+                            if (line.Contains("Domain name:", StringComparison.OrdinalIgnoreCase))
+                            {
+                                var parts = line.Split(':', 2);
+                                if (parts.Length == 2 && !string.IsNullOrWhiteSpace(parts[1]))
+                                    domainName = parts[1].Trim();
+                            }
+                            else if (line.Contains("Computer name:", StringComparison.OrdinalIgnoreCase))
+                            {
+                                var parts = line.Split(':', 2);
+                                if (parts.Length == 2 && !string.IsNullOrWhiteSpace(parts[1]))
+                                    computerName = parts[1].Trim();
+                            }
+                            else if (line.Contains("FQDN:", StringComparison.OrdinalIgnoreCase))
+                            {
+                                var parts = line.Split(':', 2);
+                                if (parts.Length == 2 && !string.IsNullOrWhiteSpace(parts[1]))
+                                    fqdn = parts[1].Trim();
+                            }
+                        }
+                    }
+                }
+                
+                hosts.Add(new HostScanResult(
+                    ipAddress,
+                    hostname,
+                    ports,
+                    domainName,
+                    computerName,
+                    fqdn,
+                    detectedOS
+                ));
             }
         }
+        catch (System.Xml.XmlException)
+        {
+            return new List<HostScanResult>();
+        }
+        catch (Exception)
+        {
+            return new List<HostScanResult>();
+        }
         
-        // Dedupe ports
-        var uniquePorts = ports
-            .GroupBy(p => (p.Number, p.Protocol.ToLowerInvariant()))
-            .Select(g => g.First())
-            .OrderBy(p => p.Number)
-            .ToList();
-
-        return new NmapParseResult(uniquePorts, domainName, computerName, fqdn, detectedOS);
+        return hosts;
     }
 }
 
-public record NmapParseResult(List<OpenPort> Ports, string? DomainName, string? ComputerName, string? FQDN, string? DetectedOS);
+public record HostScanResult(string IpAddress, string? Hostname, List<OpenPort> Ports, string? DomainName, string? ComputerName, string? FQDN, string? DetectedOS);
 
 // Validates IP addresses and CIDR notation to prevent invalid input.
 public static class IpValidator

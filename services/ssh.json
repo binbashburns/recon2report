@@ -1,0 +1,84 @@
+{
+  "service": "SSH",
+  "description": "Secure Shell remote access protocol",
+  "ports": [22],
+  "serviceNames": ["ssh"],
+  "targetOs": ["Linux", "Unix"],
+  "vectors": [
+    {
+      "id": "ssh_enumeration",
+      "name": "SSH Service Enumeration",
+      "phase": "reconnaissance",
+      "prerequisites": [],
+      "description": "Gather SSH version and configuration info",
+      "commands": [
+        {
+          "tool": "nmap",
+          "syntax": "nmap -p 22 --script ssh-hostkey,ssh2-enum-algos,ssh-auth-methods <target>",
+          "description": "SSH enumeration with NSE scripts"
+        },
+        {
+          "tool": "ssh-audit",
+          "syntax": "ssh-audit <target>",
+          "description": "Audit SSH server configuration"
+        }
+      ],
+      "outcomes": ["ssh_version", "ssh_algorithms", "weak_crypto"]
+    },
+    {
+      "id": "ssh_user_enum",
+      "name": "SSH User Enumeration",
+      "phase": "reconnaissance",
+      "prerequisites": [],
+      "description": "Enumerate valid SSH users",
+      "commands": [
+        {
+          "tool": "nmap",
+          "syntax": "nmap -p 22 --script ssh-brute --script-args userdb=<user_list> <target>",
+          "description": "Bruteforce SSH users"
+        }
+      ],
+      "outcomes": ["username"]
+    },
+    {
+      "id": "ssh_password_brute",
+      "name": "SSH Password Bruteforce",
+      "phase": "credential_access",
+      "prerequisites": ["username"],
+      "description": "Bruteforce SSH passwords",
+      "commands": [
+        {
+          "tool": "hydra",
+          "syntax": "hydra -l <user> -P <password_list> ssh://<target>",
+          "description": "SSH password bruteforce"
+        },
+        {
+          "tool": "nxc",
+          "syntax": "nxc ssh <target> -u <user> -p <password_list>",
+          "description": "NetExec SSH bruteforce"
+        }
+      ],
+      "outcomes": ["valid_credentials", "ssh_access"]
+    },
+    {
+      "id": "ssh_key_theft",
+      "name": "SSH Key Extraction",
+      "phase": "lateral_movement",
+      "prerequisites": ["file_access"],
+      "description": "Steal SSH private keys for lateral movement",
+      "commands": [
+        {
+          "tool": "find",
+          "syntax": "find / -name id_rsa 2>/dev/null",
+          "description": "Find SSH private keys"
+        },
+        {
+          "tool": "find",
+          "syntax": "find / -name authorized_keys 2>/dev/null",
+          "description": "Find authorized_keys files"
+        }
+      ],
+      "outcomes": ["ssh_key", "lateral_movement"]
+    }
+  ]
+}

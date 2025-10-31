@@ -22,25 +22,26 @@ Console.WriteLine();
 Console.Write("Name this session: ");
 var name = Console.ReadLine() ?? "Lab";
 
-var sessResp = await api.PostAsJsonAsync("sessions", new { Id = "", Name = name });
+Console.Write("Target IP or IP Range: ");
+var ip = Console.ReadLine() ?? "";
+
+// Determine if it's an IP range and store it in the session
+var isIpRange = ip.Contains("/") || ip.Contains("-");
+var ipRange = isIpRange ? ip : null;
+
+var sessResp = await api.PostAsJsonAsync("sessions", new { Id = "", Name = name, IpRange = ipRange });
 sessResp.EnsureSuccessStatusCode();
 var session = await sessResp.Content.ReadFromJsonAsync<Session>();
 Console.WriteLine($"Session: {session!.Id}");
-
-Console.Write("Target IP or IP Range: ");
-var ip = Console.ReadLine() ?? "";
-Console.Write("OS (Windows/Linux): ");
-var osInput = Console.ReadLine()?.Trim().ToLowerInvariant() ?? "linux";
-
-// Normalize OS input
-var os = osInput switch
+if (!string.IsNullOrWhiteSpace(ipRange))
 {
-    "win" or "windows" or "w" => "Windows",
-    "linux" or "lin" or "l" or "unix" => "Linux",
-    _ => "Unknown"
-};
+    Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.WriteLine($"IP Range: {ipRange}");
+    Console.ResetColor();
+}
 
-var tgtResp = await api.PostAsJsonAsync("targets", new { Id = "", SessionId = session.Id, Ip = ip, Os = os });
+// OS will be determined from Nmap scan results
+var tgtResp = await api.PostAsJsonAsync("targets", new { Id = "", SessionId = session.Id, Ip = ip, Os = "Unknown" });
 if (!tgtResp.IsSuccessStatusCode)
 {
     var error = await tgtResp.Content.ReadAsStringAsync();
@@ -53,9 +54,9 @@ var target = await tgtResp.Content.ReadFromJsonAsync<Target>();
 
 // Display target info
 var targetType = ip.Contains("/") || ip.Contains("-") ? "IP Range" : "IP";
-Console.WriteLine($"Target: {target!.Id} ({targetType}: {target.Ip}, OS: {target.Os})");
-
-// Fetch scan commands from API
+Console.WriteLine($"Target: {target!.Id} ({targetType}: {target.Ip})");
+Console.ForegroundColor = ConsoleColor.DarkGray;
+Console.ResetColor();// Fetch scan commands from API
 var cmdResp = await api.PostAsJsonAsync("nmap/suggest", new { Ip = target.Ip, Os = target.Os });
 var cmds = await cmdResp.Content.ReadFromJsonAsync<List<NmapCommand>>();
 if (cmds == null || !cmds.Any())
@@ -102,7 +103,7 @@ else if (choice == scanCommands.Count + 1)
     // Custom port list
     Console.Write("Enter comma-separated ports (e.g., 22,80,443): ");
     var customPorts = Console.ReadLine()?.Trim() ?? "22,80,443";
-    scanCommand = $"nmap -p {customPorts} -sV -sC -oN nmap_custom.txt {target.Ip}";
+    scanCommand = $"nmap -p {customPorts} -sV -sC -oX nmap_custom.xml {target.Ip}";
     scanExplanation = "Targeted scan of specific ports with version detection.";
 }
 else if (choice == scanCommands.Count + 2)
@@ -152,7 +153,7 @@ if (enumTips.Any())
 Console.WriteLine(new string('=', 60));
 
 SkipScanDisplay:
-Console.WriteLine("\nRun your scans, then paste Nmap normal output (end with a single line containing only 'EOF'):");
+Console.WriteLine("\nRun your scans, then paste Nmap XML output (end with a single line containing only 'EOF'):");
 var buf = new List<string>();
 while (true) {
     var line = Console.ReadLine();
@@ -166,27 +167,133 @@ var paste = string.Join("\n", buf);
 var uploadResp = await api.PostAsJsonAsync($"targets/{target.Id}/scan", new { NmapOutput = paste });
 if (!uploadResp.IsSuccessStatusCode)
 {
+    var errorContent = await uploadResp.Content.ReadAsStringAsync();
     Console.ForegroundColor = ConsoleColor.Red;
-    Console.WriteLine("Error uploading scan results.");
+    Console.WriteLine($"Error uploading scan results: {errorContent}");
     Console.ResetColor();
     return;
 }
 
-var scanResult = await uploadResp.Content.ReadFromJsonAsync<ScanUploadResult>();
-Console.WriteLine($"\nOpen ports detected: {scanResult!.PortsDetected}");
+var uploadJson = await uploadResp.Content.ReadAsStringAsync();
+var uploadResult = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(uploadJson);
 
-foreach (var p in scanResult.Ports) Console.WriteLine($"- {p.Protocol}/{p.Number} {p.Service} {p.Version}");
+ScanUploadResult? finalScanResult = null;
+
+// Check if multiple hosts were discovered (note: property name is lowercase 'hostCount' from API)
+if (uploadResult.TryGetProperty("hostCount", out var hostCountProp) && hostCountProp.GetInt32() > 1)
+{
+    var hostCount = hostCountProp.GetInt32();
+    Console.ForegroundColor = ConsoleColor.Green;
+    Console.WriteLine($"\n✓ Discovered {hostCount} hosts! Created separate targets for each.");
+    Console.ResetColor();
+    
+    var discoveredTargets = uploadResult.GetProperty("discoveredTargets").EnumerateArray().ToList();
+    
+    Console.WriteLine("\n" + new string('=', 60));
+    Console.WriteLine("Select a target to investigate:");
+    Console.WriteLine(new string('=', 60));
+    
+    for (int i = 0; i < discoveredTargets.Count; i++)
+    {
+        var dt = discoveredTargets[i];
+        var targetIpAddr = dt.GetProperty("ipAddress").GetString();
+        var hostname = dt.TryGetProperty("hostname", out var hn) && hn.ValueKind != System.Text.Json.JsonValueKind.Null 
+            ? hn.GetString() 
+            : null;
+        var portCount = dt.GetProperty("portsDetected").GetInt32();
+        
+        var displayName = hostname != null ? $"{hostname} ({targetIpAddr})" : targetIpAddr;
+        Console.WriteLine($"  {i + 1}. {displayName} - {portCount} open ports");
+    }
+    
+    Console.Write($"\nChoice [1-{hostCount}]: ");
+    var targetChoiceInput = Console.ReadLine()?.Trim() ?? "1";
+    
+    if (!int.TryParse(targetChoiceInput, out int targetChoiceIdx) || targetChoiceIdx < 1 || targetChoiceIdx > hostCount)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine("Invalid choice. Exiting.");
+        Console.ResetColor();
+        return;
+    }
+    
+    var selectedTarget = discoveredTargets[targetChoiceIdx - 1];
+    var targetId = selectedTarget.GetProperty("targetId").GetString()!;
+    var selectedIp = selectedTarget.GetProperty("ipAddress").GetString()!;
+    
+    // Fetch the full target details
+    var targetResp = await api.GetAsync($"targets/{targetId}");
+    target = await targetResp.Content.ReadFromJsonAsync<Target>();
+    
+    Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.WriteLine($"\n→ Selected target: {selectedIp}");
+    Console.ResetColor();
+    
+    // Parse the ports and discovered info from JSON with case-insensitive property matching
+    var jsonOptions = new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+    var portsJson = selectedTarget.GetProperty("ports").GetRawText();
+    var ports = System.Text.Json.JsonSerializer.Deserialize<List<OpenPort>>(portsJson, jsonOptions)!;
+    
+    DiscoveredInfo? discoveredInfo = null;
+    if (selectedTarget.TryGetProperty("discoveredInfo", out var infoElement))
+    {
+        var infoJson = infoElement.GetRawText();
+        discoveredInfo = System.Text.Json.JsonSerializer.Deserialize<DiscoveredInfo>(infoJson, jsonOptions);
+    }
+    
+    finalScanResult = new ScanUploadResult(
+        targetId,
+        selectedTarget.GetProperty("portsDetected").GetInt32(),
+        ports,
+        discoveredInfo
+    );
+    
+    Console.WriteLine($"\nOpen ports detected: {finalScanResult.PortsDetected}");
+    foreach (var p in finalScanResult.Ports) 
+        Console.WriteLine($"- {p.Protocol}/{p.Number} {p.Service} {p.Version}");
+}
+else
+{
+    // Single host result - use case-insensitive deserialization
+    var jsonOptions = new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+    finalScanResult = System.Text.Json.JsonSerializer.Deserialize<ScanUploadResult>(uploadJson, jsonOptions);
+    if (finalScanResult != null)
+    {
+        Console.WriteLine($"\nOpen ports detected: {finalScanResult.PortsDetected}");
+        if (finalScanResult.Ports != null)
+        {
+            foreach (var p in finalScanResult.Ports) 
+                Console.WriteLine($"- {p.Protocol}/{p.Number} {p.Service} {p.Version}");
+        }
+    }
+}
+
+// Check if we have valid scan results before proceeding
+if (finalScanResult == null || finalScanResult.Ports == null || !finalScanResult.Ports.Any() || target == null)
+{
+    Console.ForegroundColor = ConsoleColor.Yellow;
+    Console.WriteLine("\nNo hosts with open ports found in the scan output.");
+    Console.WriteLine("This could mean:");
+    Console.WriteLine("  - All hosts have their ports filtered/closed");
+    Console.WriteLine("  - The scan output format wasn't recognized");
+    Console.WriteLine("  - Try running a more targeted scan on a specific host");
+    Console.ResetColor();
+    return;
+}
+
+// Fetch latest target state after scan
+var latestTargetResp = await api.GetAsync($"targets/{target.Id}");
+target = await latestTargetResp.Content.ReadFromJsonAsync<Target>();
 
 // Interactive loop for attack progression
 var currentPhase = "reconnaissance";
 var acquiredItems = new List<string>();
-string? ipRange = null;
 string? domainName = null;
 
 // Display discovered information if any and auto-populate state
-if (scanResult.DiscoveredInfo != null)
+if (finalScanResult?.DiscoveredInfo != null)
 {
-    var info = scanResult.DiscoveredInfo;
+    var info = finalScanResult.DiscoveredInfo;
     var hasInfo = !string.IsNullOrWhiteSpace(info.DomainName) ||
                   !string.IsNullOrWhiteSpace(info.ComputerName) ||
                   !string.IsNullOrWhiteSpace(info.FQDN) ||
@@ -194,7 +301,7 @@ if (scanResult.DiscoveredInfo != null)
     
     if (hasInfo)
     {
-        Console.WriteLine("\n Discovered Information:");
+        Console.WriteLine("\n✓ Discovered Information:");
         if (!string.IsNullOrWhiteSpace(info.DomainName))
         {
             Console.ForegroundColor = ConsoleColor.Yellow;
@@ -208,7 +315,17 @@ if (scanResult.DiscoveredInfo != null)
         if (!string.IsNullOrWhiteSpace(info.FQDN))
             Console.WriteLine($"   FQDN: {info.FQDN}");
         if (!string.IsNullOrWhiteSpace(info.DetectedOS))
+        {
+            Console.ForegroundColor = ConsoleColor.Green;
             Console.WriteLine($"   Detected OS: {info.DetectedOS}");
+            Console.ResetColor();
+            
+            // Update target OS in state
+            if (target != null)
+            {
+                target = target with { Os = info.DetectedOS };
+            }
+        }
     }
 }
 
@@ -219,12 +336,18 @@ while (true)
     var attackPathReq = new {
         CurrentPhase = currentPhase,
         AcquiredItems = acquiredItems,
-        TargetIp = target.Ip,
+        TargetIp = target?.Ip ?? "",
         IpRange = ipRange ?? "",
         DomainName = domainName ?? "",
-        OpenPorts = scanResult.Ports.Select(p => p.Number).ToList(),
-        Services = scanResult.Ports.Select(p => p.Service).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct().ToList(),
-        TargetOS = target.Os
+        OpenPorts = finalScanResult?.Ports.Select(p => p.Number).ToList() ?? new List<int>(),
+        Services = finalScanResult?.Ports
+            .Select(p => p.Service)
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Select(s => s!)
+            .Distinct()
+            .ToList() ?? new List<string>(),
+        TargetOS = target?.Os ?? "",
+        SessionId = session?.Id ?? ""
     };
 
     var attackResp = await api.PostAsJsonAsync("attack-paths/suggest", attackPathReq);
@@ -275,7 +398,7 @@ while (true)
     Console.WriteLine("1. Add information (domain, username, etc.)");
     Console.WriteLine("2. Change phase");
     Console.WriteLine("3. Show commands from any phase (raw output)");
-    Console.WriteLine("4. Update target OS");
+    Console.WriteLine("4. Override detected OS");
     Console.WriteLine("5. Exit");
     Console.Write("Choice: ");
     
@@ -449,11 +572,18 @@ while (true)
             break;
             
         case "4":
-            Console.Write("New OS: ");
-            var newOs = Console.ReadLine() ?? target.Os;
-            var put = await api.PutAsJsonAsync($"targets/{target.Id}", new { Id = target.Id, SessionId = session.Id, Ip = target.Ip, Os = newOs });
-            Console.WriteLine(put.IsSuccessStatusCode ? "Updated." : "Update failed.");
-            target = target with { Os = newOs };
+            if (target == null) break;
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine($"Current OS: {target.Os}");
+            Console.ResetColor();
+            Console.Write("Override with (Windows/Linux/Unknown): ");
+            var newOs = Console.ReadLine()?.Trim();
+            if (!string.IsNullOrWhiteSpace(newOs))
+            {
+                var put = await api.PutAsJsonAsync($"targets/{target.Id}", new { Id = target.Id, SessionId = session!.Id, Ip = target.Ip, Os = newOs });
+                Console.WriteLine(put.IsSuccessStatusCode ? "Updated." : "Update failed.");
+                target = target with { Os = newOs };
+            }
             break;
             
         case "5":
@@ -467,7 +597,7 @@ while (true)
 }
 
 // Local DTOs (mirror API)
-record Session(string Id, string Name);
+record Session(string Id, string Name, string? IpRange = null);
 record Target(string Id, string SessionId, string Ip, string Os);
 record OpenPort(int Number, string Protocol, string? Service, string? Version);
 record NmapCommand(string Title, string Command, string Explanation);

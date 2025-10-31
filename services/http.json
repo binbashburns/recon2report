@@ -1,0 +1,149 @@
+{
+  "service": "HTTP/HTTPS",
+  "description": "Web services and applications",
+  "ports": [80, 443, 8000, 8080, 8443, 8888],
+  "serviceNames": ["http", "https", "ssl/http", "http-proxy"],
+  "targetOs": ["Any"],
+  "vectors": [
+    {
+      "id": "http_discovery",
+      "name": "Web Service Discovery",
+      "phase": "reconnaissance",
+      "prerequisites": [],
+      "description": "Identify web technologies and gather basic information",
+      "commands": [
+        {
+          "tool": "curl",
+          "syntax": "curl -I <target>",
+          "description": "Get HTTP headers"
+        },
+        {
+          "tool": "whatweb",
+          "syntax": "whatweb <target>",
+          "description": "Identify web technologies"
+        },
+        {
+          "tool": "nmap",
+          "syntax": "nmap -p <port> --script http-enum,http-headers,http-methods,http-title <target>",
+          "description": "HTTP enumeration with NSE scripts"
+        }
+      ],
+      "outcomes": ["web_technology", "server_version", "framework"]
+    },
+    {
+      "id": "http_directory_brute",
+      "name": "Directory and File Bruteforcing",
+      "phase": "reconnaissance",
+      "prerequisites": [],
+      "description": "Discover hidden directories and files",
+      "commands": [
+        {
+          "tool": "gobuster",
+          "syntax": "gobuster dir -u <target> -w /usr/share/wordlists/dirb/common.txt",
+          "description": "Directory bruteforce"
+        },
+        {
+          "tool": "ffuf",
+          "syntax": "ffuf -u http://<target>/FUZZ -w /usr/share/wordlists/dirb/common.txt",
+          "description": "Fast web fuzzer"
+        },
+        {
+          "tool": "feroxbuster",
+          "syntax": "feroxbuster -u http://<target> -w /usr/share/wordlists/dirb/common.txt",
+          "description": "Recursive directory discovery"
+        }
+      ],
+      "outcomes": ["hidden_directories", "admin_panel", "backup_files"]
+    },
+    {
+      "id": "http_vulnerability_scan",
+      "name": "Web Vulnerability Scanning",
+      "phase": "reconnaissance",
+      "prerequisites": [],
+      "description": "Automated scanning for common web vulnerabilities",
+      "commands": [
+        {
+          "tool": "nikto",
+          "syntax": "nikto -h <target>",
+          "description": "Comprehensive web server scanner"
+        },
+        {
+          "tool": "nuclei",
+          "syntax": "nuclei -u <target> -t /path/to/templates/",
+          "description": "Template-based vulnerability scanning"
+        }
+      ],
+      "outcomes": ["vulnerable_host", "misconfiguration"]
+    },
+    {
+      "id": "http_sql_injection",
+      "name": "SQL Injection Testing",
+      "phase": "exploitation",
+      "prerequisites": ["web_application"],
+      "description": "Test for SQL injection vulnerabilities",
+      "commands": [
+        {
+          "tool": "sqlmap",
+          "syntax": "sqlmap -u '<target_url>' --batch",
+          "description": "Automated SQL injection"
+        },
+        {
+          "tool": "sqlmap",
+          "syntax": "sqlmap -u '<target_url>' --batch --dbs",
+          "description": "Enumerate databases"
+        },
+        {
+          "tool": "sqlmap",
+          "syntax": "sqlmap -u '<target_url>' --batch --dump -D <database> -T <table>",
+          "description": "Dump table contents"
+        }
+      ],
+      "outcomes": ["database_access", "credentials", "data_exfiltration"]
+    },
+    {
+      "id": "http_xss_test",
+      "name": "Cross-Site Scripting (XSS) Testing",
+      "phase": "exploitation",
+      "prerequisites": ["web_application"],
+      "description": "Test for XSS vulnerabilities",
+      "commands": [
+        {
+          "tool": "xsstrike",
+          "syntax": "xsstrike -u '<target_url>'",
+          "description": "Automated XSS detection"
+        }
+      ],
+      "outcomes": ["xss_vulnerability"]
+    },
+    {
+      "id": "http_default_creds",
+      "name": "Default Credentials Testing",
+      "phase": "credential_access",
+      "prerequisites": ["admin_panel"],
+      "description": "Test common default credentials",
+      "commands": [
+        {
+          "tool": "hydra",
+          "syntax": "hydra -C /usr/share/seclists/Passwords/Default-Credentials/default-passwords.txt <target> http-post-form '<path>:<user_field>=^USER^&<pass_field>=^PASS^:<failure_string>'",
+          "description": "Test default credential pairs"
+        }
+      ],
+      "outcomes": ["valid_credentials", "admin_access"]
+    },
+    {
+      "id": "http_upload_rce",
+      "name": "File Upload to RCE",
+      "phase": "exploitation",
+      "prerequisites": ["file_upload"],
+      "description": "Exploit file upload for remote code execution",
+      "commands": [
+        {
+          "tool": "curl",
+          "syntax": "curl -F 'file=@shell.php' <target>/upload.php",
+          "description": "Upload web shell"
+        }
+      ],
+      "outcomes": ["shell", "code_execution"]
+    }
+  ]
+}

@@ -5,13 +5,15 @@ Better pentesting, from recon to reporting.
 ## Overview
 - **R2R.Api**: ASP.NET Core minimal API that stores session/target data in memory and exposes endpoints for Nmap parsing and rule-based attack path suggestions.
 - **R2R.Cli**: Lightweight console client that drives the API workflow from the terminal.
-- **R2R.Core.Domain**: Domain models for attack vectors, commands, outcomes, and rule sets.
-- **R2R.Core.Parsing**: Markdown parser that converts attack path documentation into structured rule sets. (Credit goes to [@Orange-Cyberdefense](https://github.com/Orange-Cyberdefense) for the [mindmap](https://github.com/Orange-Cyberdefense/ocd-mindmaps/tree/main/excalimap/mindmap/ad) which these rules were derived from!)
-- **R2R.Core.Rules**: Rule engine that evaluates current state and suggests applicable attack vectors.
+- **R2R.Core.Domain**: Domain models for attack vectors, commands, outcomes, and service rule sets.
+- **R2R.Core.Parsing**: JSON parser that loads service-based attack vector definitions from structured files.
+- **R2R.Core.Rules**: Service-aware rule engine that evaluates current state and suggests applicable attack vectors.
 - **R2R.Tests**: xUnit tests covering parsing, rule engine, and Nmap helpers.
-- **docs/**: Markdown files defining attack paths and techniques (e.g., `no_creds.md`, `authenticated.md`).
+- **services/**: Service-specific JSON files defining attack vectors organized by protocol/service (e.g., `smb.json`, `http.json`, `kerberos.json`).
 
 Everything runs in-memory (no persistence yet) so it is ideal for quick lab-style recon exercises.
+
+> **Note**: Attack techniques are derived from [@Orange-Cyberdefense](https://github.com/Orange-Cyberdefense)'s excellent [Active Directory mindmap](https://github.com/Orange-Cyberdefense/ocd-mindmaps/tree/main/excalimap/mindmap/ad).
 
 ## Prerequisites
 - [.NET 9 SDK](https://dotnet.microsoft.com/) (Preview as of now). `dotnet --version` should report `9.0.*`.
@@ -48,37 +50,121 @@ All data lives in memory; restarting the API clears it.
 
 ## Attack Path System
 
-The system uses markdown files in `/docs/` to define attack paths dynamically. This allows you to maintain attack techniques without changing code.
+The system uses **service-based JSON files** in `/services/` to define attack paths dynamically. This allows you to maintain attack techniques without changing code, with better organization and performance.
 
 ### How It Works
-1. **Markdown files** (e.g., `no_creds.md`) define attack phases and techniques
-2. **Parser** loads these at API startup into structured rule sets
-3. **Rule engine** matches your current state (phase, ports, services) to applicable techniques
+1. **Nmap scan** detects open ports and services on target
+2. **Port-to-service mapping** loads only relevant JSON files
+   - Port 445 → Load `smb.json`
+   - Port 80/443 → Load `http.json`
+   - Port 389 → Load `active-directory.json`
+   - Always load `network-general.json`
+3. **Rule engine** filters vectors by:
+   - **Phase** (reconnaissance → credential_access → lateral_movement → privilege_escalation → persistence)
+   - **Prerequisites** (what you've already obtained)
+   - **Target OS** (Windows/Linux/Any)
 4. **Variable substitution** fills in `<ip>`, `<domain>`, `<ip_range>` placeholders with real values
 
-### Example
-From `no_creds.md`:
-```markdown
-## Anonymous SMB access >>> Username
-- `smbclient -L //<ip> -N`
-- `enum4linux-ng -A <ip>`
+### Service-Based Architecture
+
+Attack vectors are organized by service/protocol rather than by phase:
+
+```
+services/
+├── Network Services
+│   ├── smb.json          # SMB/CIFS attacks (ports 445, 139)
+│   ├── http.json         # Web attacks (ports 80, 443, 8080)
+│   ├── dns.json          # DNS attacks (port 53)
+│   ├── ldap.json         # LDAP attacks (ports 389, 636)
+│   ├── kerberos.json     # Kerberos attacks (port 88)
+│   ├── ssh.json          # SSH attacks (port 22)
+│   ├── rdp.json          # RDP attacks (port 3389)
+│   ├── winrm.json        # WinRM attacks (ports 5985, 5986)
+│   ├── ftp.json          # FTP attacks (port 21)
+│   └── network-general.json  # Network-level attacks
+│
+├── Active Directory
+│   ├── active-directory.json  # ACLs, delegation, trusts
+│   ├── adcs.json              # Certificate Services (ESC1-ESC15)
+│   └── sccm.json              # SCCM/MECM exploitation
+│
+├── Windows
+│   ├── windows-admin.json      # Credential extraction
+│   ├── windows-privesc.json    # Local privilege escalation
+│   └── windows-persistence.json # Persistence mechanisms
+│
+└── Techniques
+    ├── vulnerabilities.json     # Known CVE exploits
+    ├── password-cracking.json   # Hash cracking
+    └── ntlm-relay.json          # NTLM relay attacks
 ```
 
-When you call the API with `targetIp: "192.168.1.5"`, you get:
+### JSON Schema
+
+Each service file follows this structure:
+
 ```json
 {
-  "name": "Anonymous SMB access",
-  "commands": [
+  "service": "smb",
+  "description": "SMB/CIFS attacks for Windows file sharing",
+  "ports": [139, 445],
+  "serviceNames": ["microsoft-ds", "netbios-ssn"],
+  "targetOs": ["windows"],
+  "vectors": [
     {
-      "tool": "smbclient",
-      "rawSyntax": "smbclient -L //<ip> -N",
-      "readyCommand": "smbclient -L //192.168.1.5 -N"
+      "id": "smb-anonymous-enum",
+      "name": "Anonymous SMB Enumeration",
+      "phase": "reconnaissance",
+      "prerequisites": ["network_access"],
+      "description": "Enumerate SMB shares without authentication",
+      "commands": [
+        {
+          "tool": "smbclient",
+          "command": "smbclient -L //<ip> -N",
+          "description": "List SMB shares anonymously"
+        }
+      ],
+      "outcomes": ["information_gathered"]
     }
   ]
 }
 ```
 
-See `/docs/README.md` for complete documentation on maintaining markdown files.
+### Example: HTTP-Only Host
+
+**Scenario**: Nmap detects ports 80 and 443 open
+
+**System loads**: `http.json`, `network-general.json` (only 2 files instead of all services)
+
+**Filters by phase**: `reconnaissance` (initial stage)
+
+**Returns vectors**:
+- Web Service Discovery
+- Directory Bruteforcing  
+- Vulnerability Scanning
+- Network Discovery
+- LLMNR Poisoning
+
+**Does NOT return**: SMB, LDAP, SSH, RDP vectors (those services aren't loaded)
+
+### Kill Chain Phases
+
+Attack paths follow standard penetration testing methodology:
+
+1. **reconnaissance** - Initial discovery, no credentials required
+2. **credential_access** - Obtaining credentials (bruteforce, poisoning, etc.)
+3. **lateral_movement** - Moving through network with valid credentials
+4. **privilege_escalation** - Elevating privileges
+5. **persistence** - Maintaining access
+
+### Benefits
+
+-  **Simple Logic** - No complex port filtering in code, just load relevant files
+-  **Fast Performance** - Only parse 2-4 relevant services instead of all attack vectors
+-  **Easy Maintenance** - All SMB attacks in one place, edit JSON without touching code
+-  **Accurate Filtering** - Port-based loading prevents irrelevant suggestions
+-  **Machine Readable** - JSON is structured, parseable, and efficient
+-  **Clear Dependencies** - Prerequisites explicitly defined in each vector
 
 ## API Surface
 | Method & Path            | Description                                              |
@@ -103,13 +189,19 @@ dotnet test
 
 ## Project Layout
 ```
-R2R.Api/             Minimal API (endpoints + helpers)
-R2R.Cli/             Console workflow client
-R2R.Core.Domain/     Domain models (AttackVector, Command, Outcome, RuleSet, AttackState)
-R2R.Core.Parsing/    Markdown parser for attack path files
-R2R.Core.Rules/      Rule engine for evaluating attack states
-R2R.Tests/           xUnit test project
-docs/                Markdown files defining attack paths (e.g., no_creds.md)
+R2R.Api/                  Minimal API (endpoints + helpers)
+R2R.Cli/                  Console workflow client
+R2R.Core.Domain/          Domain models (AttackVector, Command, Outcome, ServiceRuleSet, AttackState)
+R2R.Core.Parsing/         JSON parser for service rule files
+R2R.Core.Rules/           Service-aware rule engine for evaluating attack states
+R2R.Tests/                xUnit test project
+services/                 JSON files defining service-based attack vectors
+  ├── smb.json           SMB/CIFS attacks
+  ├── http.json          Web application attacks
+  ├── active-directory.json  AD attacks (ACLs, delegation, trusts)
+  ├── adcs.json          Certificate Services attacks
+  ├── vulnerabilities.json   Known CVE exploits
+  └── ...                19 service files total
 ```
 
 ## Troubleshooting
