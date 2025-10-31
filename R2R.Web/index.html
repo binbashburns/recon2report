@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>recon2report</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <div id="app">
+        <header>
+            <h1>recon2report ⓡ②ⓡ</h1>
+            <p class="tagline">Better pentesting, from recon to reporting</p>
+        </header>
+
+        <main id="main-content">
+            <!-- Screen 1: Session + Target Form -->
+            <section id="session-form" class="screen active">
+                <h2>Create Session & Target</h2>
+                <form id="create-session-form">
+                    <div class="form-group">
+                        <label for="session-name">Session Name</label>
+                        <input type="text" id="session-name" placeholder="e.g., htb-lab" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="target-ip">Target IP</label>
+                        <input type="text" id="target-ip" placeholder="e.g., 192.168.1.10" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="target-os">Target OS</label>
+                        <select id="target-os" required>
+                            <option value="">Select OS</option>
+                            <option value="windows">Windows</option>
+                            <option value="linux">Linux</option>
+                            <option value="unknown">Unknown</option>
+                        </select>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary">Create Session</button>
+                </form>
+            </section>
+
+            <!-- Screen 2: Nmap Suggestions -->
+            <section id="nmap-suggestions" class="screen">
+                <h2>Nmap Scan Suggestions</h2>
+                <p class="hint">Choose a scan strategy based on your time and needs</p>
+                <div id="nmap-commands-list"></div>
+                <div class="button-group">
+                    <button type="button" class="btn btn-secondary" onclick="goToScreen('session-form')">Back</button>
+                    <button type="button" class="btn btn-primary" onclick="goToScreen('nmap-paste')">Paste Results</button>
+                </div>
+            </section>
+
+            <!-- Screen 3: Paste Nmap -->
+            <section id="nmap-paste" class="screen">
+                <h2>Paste Nmap XML Output</h2>
+                <p class="hint">Run your Nmap scan with <code>-oX</code> flag and paste the XML output below</p>
+                <form id="nmap-form">
+                    <div class="form-group">
+                        <textarea id="nmap-xml" rows="15" placeholder="Paste Nmap XML output here..." required></textarea>
+                    </div>
+                    <div class="button-group">
+                        <button type="button" class="btn btn-secondary" onclick="goToScreen('nmap-suggestions')">Back</button>
+                        <button type="submit" class="btn btn-primary">Parse Scan</button>
+                    </div>
+                </form>
+            </section>
+
+            <!-- Screen 4: Parsed Ports -->
+            <section id="parsed-ports" class="screen">
+                <h2>Detected Ports & Services</h2>
+                <div id="ports-list"></div>
+                <div class="button-group">
+                    <button type="button" class="btn btn-secondary" onclick="goToScreen('nmap-paste')">Back</button>
+                    <button type="button" class="btn btn-primary" onclick="getSuggestions()">Get Attack Vectors</button>
+                </div>
+            </section>
+
+            <!-- Screen 5: Suggestions / Next Steps -->
+            <section id="suggestions" class="screen">
+                <h2>Attack Path Suggestions</h2>
+                <div class="phase-selector">
+                    <label for="phase-select">Current Phase:</label>
+                    <select id="phase-select" onchange="updatePhase()">
+                        <option value="reconnaissance">Reconnaissance</option>
+                        <option value="credential_access">Credential Access</option>
+                        <option value="lateral_movement">Lateral Movement</option>
+                        <option value="privilege_escalation">Privilege Escalation</option>
+                        <option value="persistence">Persistence</option>
+                    </select>
+                </div>
+                <div id="suggestions-list"></div>
+                <div class="button-group">
+                    <button type="button" class="btn btn-secondary" onclick="goToScreen('parsed-ports')">Back</button>
+                    <button type="button" class="btn btn-primary" onclick="goToScreen('session-form')">New Session</button>
+                </div>
+            </section>
+        </main>
+
+        <div id="status" class="status"></div>
+    </div>
+
+    <script type="module" src="/main.js"></script>
+</body>
+</html>

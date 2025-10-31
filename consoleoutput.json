@@ -1,0 +1,125 @@
+{
+    "message": "Multiple hosts detected. Created 5 separate targets.",
+    "hostCount": 5,
+    "originalTargetId": "ff273086cbaa467f971ebe36e7c1316e",
+    "discoveredTargets": [
+        {
+            "targetId": "b2f895e756244c20af82b1b587df42e3",
+            "ipAddress": "192.168.1.1",
+            "hostname": "osync.lan",
+            "portsDetected": 3,
+            "ports": [
+                {
+                    "number": 53,
+                    "protocol": "tcp",
+                    "service": "domain",
+                    "version": "dnsmasq 2.89"
+                },
+                {
+                    "number": 80,
+                    "protocol": "tcp",
+                    "service": "http",
+                    "version": "lighttpd 1.4.59"
+                },
+                {
+                    "number": 443,
+                    "protocol": "tcp",
+                    "service": "http",
+                    "version": "lighttpd 1.4.59"
+                }
+            ],
+            "discoveredInfo": {
+                "domainName": null,
+                "computerName": null,
+                "fqdn": null,
+                "detectedOS": null
+            }
+        },
+        {
+            "targetId": "557e8a371ceb4b4dabc1ba9ec8a05170",
+            "ipAddress": "192.168.1.5",
+            "hostname": "Thermostat.lan",
+            "portsDetected": 1,
+            "ports": [
+                {
+                    "number": 7100,
+                    "protocol": "tcp",
+                    "service": "rtsp",
+                    "version": "Sonos speaker rtspd"
+                }
+            ],
+            "discoveredInfo": {
+                "domainName": null,
+                "computerName": null,
+                "fqdn": null,
+                "detectedOS": null
+            }
+        },
+        {
+            "targetId": "e24dcabe25f7477ab3f6b3dbd5335131",
+            "ipAddress": "192.168.1.52",
+            "hostname": "iPhone-101.lan",
+            "portsDetected": 2,
+            "ports": [
+                {
+                    "number": 49152,
+                    "protocol": "tcp",
+                    "service": "tcpwrapped",
+                    "version": null
+                },
+                {
+                    "number": 62078,
+                    "protocol": "tcp",
+                    "service": "tcpwrapped",
+                    "version": null
+                }
+            ],
+            "discoveredInfo": {
+                "domainName": null,
+                "computerName": null,
+                "fqdn": null,
+                "detectedOS": null
+            }
+        },
+        {
+            "targetId": "f6cfc19541cc4af185f56aee56bb833c",
+            "ipAddress": "192.168.1.226",
+            "hostname": "LivingRoom.lan",
+            "portsDetected": 1,
+            "ports": [
+                {
+                    "number": 7000,
+                    "protocol": "tcp",
+                    "service": "rtsp",
+                    "version": "AirTunes rtspd 377.40.00"
+                }
+            ],
+            "discoveredInfo": {
+                "domainName": null,
+                "computerName": null,
+                "fqdn": null,
+                "detectedOS": null
+            }
+        },
+        {
+            "targetId": "6a5afb2e97204ae184b7d9f61bb44a56",
+            "ipAddress": "192.168.1.246",
+            "hostname": "W550-0D6C3C.lan",
+            "portsDetected": 1,
+            "ports": [
+                {
+                    "number": 80,
+                    "protocol": "tcp",
+                    "service": "http",
+                    "version": null
+                }
+            ],
+            "discoveredInfo": {
+                "domainName": null,
+                "computerName": null,
+                "fqdn": null,
+                "detectedOS": null
+            }
+        }
+    ]
+}
