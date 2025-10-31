@@ -7,35 +7,57 @@ Better pentesting, from reconnaissance to reporting.
 
 recon2report transforms Nmap scan results into context-aware penetration testing commands. The system automatically suggests relevant attack vectors based on detected services, current penetration testing phase, and acquired access.
 
-**Phase 1 Scope**: CLI workflow with intelligent attack path suggestions. All data is stored in-memory (no persistence). Future phases will add persistent storage, web UI, and report generation.
+**Phase 1 Scope**: CLI and web UI workflows with intelligent attack path suggestions. All data is stored in-memory (no persistence). Future phases will add persistent storage and report generation.
 
-## Overview
-1. Restore and build once to pull dependencies:
-   ```bash
-   dotnet restore
-   ```
-2. Start the API in one terminal:
+## Getting Started
+
+### Option 1: Web Interface (Recommended)
+
+1. Start the API:
    ```bash
    dotnet run --project R2R.Api
    ```
-   The default launch profile listens on `http://localhost:5258` and exposes OpenAPI JSON at `/openapi/v1.json`.
+   API runs on `http://localhost:5258`
 
-   ![img2](/assets/step-1.png)
-3. Launch the CLI in a separate terminal:
+2. Start the web frontend (in a separate terminal):
+   ```bash
+   cd R2R.Web
+   npm install
+   npm run dev
+   ```
+   Web UI opens at `http://localhost:5173`
+
+3. Use the browser interface to:
+   - Create sessions and targets
+   - Get Nmap scan suggestions
+   - Paste scan results
+   - View parsed ports from multiple hosts
+   - Explore attack vectors by phase
+
+### Screenshots:
+
+#### Session creation and Nmap suggestions
+![Web UI Session Form](./assets/web-session.png)
+
+#### Multi-host scan results with nested ports
+![Web UI Parsed Ports](./assets/web-ports.png)
+
+#### Phase-based attack suggestions
+![Web UI Attack Vectors](./assets/web-vectors.png)
+
+### Option 2: CLI Workflow
+
+1. Start the API in one terminal:
+   ```bash
+   dotnet run --project R2R.Api
+   ```
+   
+2. Launch the CLI in a separate terminal:
    ```bash
    dotnet run --project R2R.Cli
    ```
-   ![img3](/assets/step-2.png)
 
-## Typical Workflow
-1. When prompted, name the session and provide the target IP/OS.
-2. Review the suggested Nmap commands surfaced by the API.
-3. Run any scans you want, then paste the Nmap "normal" output into the CLI and terminate with a single `EOF` line.
-4. The CLI displays parsed open ports followed by **rule-based attack path suggestions** from markdown files.
-   - Attack vectors are loaded from `/docs/*.md` files at API startup
-   - Commands are automatically customized with your target IP, domain, and IP range
-   - Suggestions are filtered based on open ports and services
-5. Demonstrate CRUD via the optional prompts to update/delete the target.
+3. Follow the prompts to create a session, run Nmap scans, and get attack suggestions.
 
 All data lives in memory; restarting the API clears it.
 
@@ -136,7 +158,6 @@ Each service file follows this structure:
 - Network Discovery
 - LLMNR Poisoning
 
-**Does NOT return**: SMB, LDAP, SSH, RDP vectors (those services aren't loaded)
 
 ### Kill Chain Phases
 
@@ -182,6 +203,11 @@ dotnet test
 ```
 R2R.Api/                  Minimal API (endpoints + helpers)
 R2R.Cli/                  Console workflow client
+R2R.Web/                  Static web frontend (Vite + Vanilla JS)
+  ├── index.html         Single-page application
+  ├── main.js            Application logic and API integration
+  ├── style.css          Custom styling
+  └── package.json       Vite dev server
 R2R.Core.Domain/          Domain models (AttackVector, Command, Outcome, ServiceRuleSet, AttackState)
 R2R.Core.Parsing/         JSON parser for service rule files
 R2R.Core.Rules/           Service-aware rule engine for evaluating attack states
@@ -193,10 +219,16 @@ services/                 JSON files defining service-based attack vectors
   ├── adcs.json          Certificate Services attacks
   ├── vulnerabilities.json   Known CVE exploits
   └── ...                19 service files total
+adrs/                     Architecture Decision Records
+  ├── 0000-architecture-overview.md
+  ├── 0001-adding-services.md
+  └── 0002-web-frontend.md
 ```
 
 ## Troubleshooting
 - **403 from CLI**: Ensure the API is running and that `R2R_API_BASE` matches its URL (defaults to `http://localhost:5258/`).
+- **CORS errors in browser**: Verify the API is running with CORS enabled for `http://localhost:5173`.
+- **Web UI not loading**: Run `npm install` in `R2R.Web/` first, then `npm run dev`.
 - **Swagger/Swashbuckle build errors**: The project relies on `Microsoft.AspNetCore.OpenApi` only; make sure no other Swagger packages are referenced.
 - **dotnet test errors**: Confirm the API project builds; missing types are usually due to visibility changes in `Program.cs`.
 
