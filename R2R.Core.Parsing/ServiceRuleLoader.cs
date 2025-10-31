@@ -38,6 +38,7 @@ public class ServiceRuleLoader
         var vectors = dto.Vectors?.Select(v => new AttackVector(
             Id: v.Id ?? "",
             Name: v.Name ?? "",
+            Phase: v.Phase,
             Prerequisites: v.Prerequisites ?? new List<string>(),
             PossibleOutcomes: (v.Outcomes ?? new List<string>()).Select(o => new Outcome(
                 StateId: o.ToLowerInvariant().Replace(" ", "_"),  // Convert "Domain Admin" to "domain_admin"
