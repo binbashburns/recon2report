@@ -1,24 +1,15 @@
 # recon2report ⓡ②ⓡ
 ![img1](./assets/r2r-logo.png)
-Better pentesting, from recon to reporting.
+
+Better pentesting, from reconnaissance to reporting.
+
+## Project Purpose
+
+recon2report transforms Nmap scan results into context-aware penetration testing commands. The system automatically suggests relevant attack vectors based on detected services, current penetration testing phase, and acquired access.
+
+**Phase 1 Scope**: CLI workflow with intelligent attack path suggestions. All data is stored in-memory (no persistence). Future phases will add persistent storage, web UI, and report generation.
 
 ## Overview
-- **R2R.Api**: ASP.NET Core minimal API that stores session/target data in memory and exposes endpoints for Nmap parsing and rule-based attack path suggestions.
-- **R2R.Cli**: Lightweight console client that drives the API workflow from the terminal.
-- **R2R.Core.Domain**: Domain models for attack vectors, commands, outcomes, and service rule sets.
-- **R2R.Core.Parsing**: JSON parser that loads service-based attack vector definitions from structured files.
-- **R2R.Core.Rules**: Service-aware rule engine that evaluates current state and suggests applicable attack vectors.
-- **R2R.Tests**: xUnit tests covering parsing, rule engine, and Nmap helpers.
-- **services/**: Service-specific JSON files defining attack vectors organized by protocol/service (e.g., `smb.json`, `http.json`, `kerberos.json`).
-
-Everything runs in-memory (no persistence yet) so it is ideal for quick lab-style recon exercises.
-
-> **Note**: Attack techniques are derived from [@Orange-Cyberdefense](https://github.com/Orange-Cyberdefense)'s excellent [Active Directory mindmap](https://github.com/Orange-Cyberdefense/ocd-mindmaps/tree/main/excalimap/mindmap/ad).
-
-## Prerequisites
-- [.NET 9 SDK](https://dotnet.microsoft.com/) (Preview as of now). `dotnet --version` should report `9.0.*`.
-
-## Getting Started
 1. Restore and build once to pull dependencies:
    ```bash
    dotnet restore
@@ -208,3 +199,25 @@ services/                 JSON files defining service-based attack vectors
 - **403 from CLI**: Ensure the API is running and that `R2R_API_BASE` matches its URL (defaults to `http://localhost:5258/`).
 - **Swagger/Swashbuckle build errors**: The project relies on `Microsoft.AspNetCore.OpenApi` only; make sure no other Swagger packages are referenced.
 - **dotnet test errors**: Confirm the API project builds; missing types are usually due to visibility changes in `Program.cs`.
+
+## License
+
+This project is licensed under the **Business Source License 1.1 (BSL)**. See [LICENSE](./LICENSE) for full text.
+
+**Summary**:
+- Free for testing, development, and educational use
+- Free for penetration testing labs and CTF competitions
+- NOT for production use without a commercial license
+- Converts to Apache 2.0 license after 4 years
+
+## Safety Warning
+
+**FOR AUTHORIZED TESTING ONLY**
+
+This tool is designed for:
+- Penetration testing labs (HackTheBox, TryHackMe, OSCP)
+- CTF competitions
+- Security research and education
+- Authorized penetration testing engagements with written permission
+
+**NEVER use this tool against systems you don't own or have explicit written permission to test.** Unauthorized access to computer systems is illegal.
