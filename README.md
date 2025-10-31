@@ -37,13 +37,19 @@ recon2report transforms Nmap scan results into context-aware penetration testing
 ### Screenshots:
 
 #### Session creation and Nmap suggestions
-![Web UI Session Form](./assets/web-session.png)
+<p align="center">
+  <img src="./assets/web-session.png" alt="Web UI Session Form" width="800">
+</p>
 
 #### Multi-host scan results with nested ports
-![Web UI Parsed Ports](./assets/web-ports.png)
+<p align="center">
+  <img src="./assets/web-ports.png" alt="Web UI Parsed Ports" width="800">
+</p>
 
 #### Phase-based attack suggestions
-![Web UI Attack Vectors](./assets/web-vectors.png)
+<p align="center">
+  <img src="./assets/web-vectors.png" alt="Web UI Attack Vectors" width="800">
+</p>
 
 ### Option 2: CLI Workflow
 
