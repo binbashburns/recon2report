@@ -300,6 +300,23 @@ code {
     flex: 1;
 }
 
+/* Service Groups */
+.service-group {
+    margin-bottom: 2rem;
+}
+
+.service-heading {
+    color: var(--primary);
+    font-size: 1.4rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid var(--primary);
+}
+
+.service-vectors {
+    margin-left: 0.5rem;
+}
+
 .vector-card {
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -335,6 +352,15 @@ code {
     font-size: 0.9rem;
     color: var(--text);
     word-break: break-all;
+    cursor: pointer;
+    padding: 0.5rem;
+    margin: -0.5rem;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+}
+
+.command-syntax:hover {
+    background: #e2e8f0;
 }
 
 .command-desc {

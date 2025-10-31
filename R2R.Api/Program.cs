@@ -232,8 +232,8 @@ app.MapPost("/attack-paths/suggest", (AttackPathRequest req) => {
         TargetOS: req.TargetOS
     );
 
-    // Get all applicable vectors for current phase (includes "always" phase)
-    var allVectors = ruleEngine.Evaluate(state).ToList();
+    // Get all applicable vectors with their service names
+    var allVectorsWithService = ruleEngine.EvaluateWithService(state).ToList();
     
     // Try to get IP range from session if not provided in request
     var ipRange = req.IpRange;
@@ -252,12 +252,13 @@ app.MapPost("/attack-paths/suggest", (AttackPathRequest req) => {
             DomainName = req.DomainName,
             IpRange = ipRange
         },
-        ApplicableVectors = allVectors.Select(v => new {
-            v.Id,
-            v.Name,
-            v.Prerequisites,
-            PossibleOutcomes = v.PossibleOutcomes.Select(o => o.DisplayName).ToList(),
-            Commands = v.Commands.Select(c => new { 
+        ApplicableVectors = allVectorsWithService.Select(vs => new {
+            vs.Vector.Id,
+            vs.Vector.Name,
+            vs.Vector.Prerequisites,
+            Service = vs.ServiceName,
+            PossibleOutcomes = vs.Vector.PossibleOutcomes.Select(o => o.DisplayName).ToList(),
+            Commands = vs.Vector.Commands.Select(c => new { 
                 c.Tool, 
                 RawSyntax = c.Syntax,
                 // Substitute variables in command syntax, including open ports
