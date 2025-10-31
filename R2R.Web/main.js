@@ -103,13 +103,21 @@ function displayNmapCommands(commands) {
         <div class="nmap-command-card">
             <h3>${cmd.title}</h3>
             ${cmd.command && cmd.command !== 'N/A' ? `
-                <div class="nmap-command-syntax" onclick="copyToClipboard('${cmd.command.replace(/'/g, "\\'")}', this)" title="Click to copy">
+                <div class="nmap-command-syntax" data-command="${cmd.command.replace(/"/g, '&quot;')}" title="Click to copy">
                     ${cmd.command}
                 </div>
             ` : ''}
             <div class="nmap-command-description">${cmd.explanation}</div>
         </div>
     `).join('');
+    
+    // Add click listeners after rendering
+    document.querySelectorAll('.nmap-command-syntax').forEach(el => {
+        el.addEventListener('click', () => {
+            const text = el.getAttribute('data-command');
+            copyToClipboard(text, el);
+        });
+    });
 }
 
 function copyToClipboard(text, element) {
@@ -120,6 +128,26 @@ function copyToClipboard(text, element) {
         setTimeout(() => {
             element.style.background = originalBg;
         }, 500);
+    }).catch(() => {
+        // Fallback: try the old execCommand method
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        try {
+            document.execCommand('copy');
+            showStatus('Copied to clipboard!');
+            const originalBg = element.style.background;
+            element.style.background = '#d1fae5';
+            setTimeout(() => {
+                element.style.background = originalBg;
+            }, 500);
+        } catch (fallbackErr) {
+            showStatus('Copy failed. Please copy manually.', 'error');
+        }
+        document.body.removeChild(textarea);
     });
 }
 
@@ -138,12 +166,10 @@ document.getElementById('nmap-form').addEventListener('submit', async (e) => {
         
         if (!res.ok) {
             const errorText = await res.text();
-            console.error('API Error:', errorText);
             throw new Error('Failed to parse Nmap output');
         }
         
         const data = await res.json();
-        console.log('Parsed scan data:', data);
         
         // Handle multiple hosts vs single host response
         if (data.discoveredTargets && data.discoveredTargets.length > 0) {
@@ -255,4 +281,3 @@ function displaySuggestions(vectors) {
 }
 
 // Initialize
-console.log('recon2report web app loaded');
