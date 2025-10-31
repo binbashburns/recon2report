@@ -406,4 +406,248 @@ public class ServiceRuleEngineTests
         Assert.Contains(vectors, v => v.Name.Contains("Anonymous"));
         Assert.DoesNotContain(vectors, v => v.Name.Contains("Authenticated"));
     }
+
+    [Fact]
+    public void WebPortsProduceHttpEnumTips()
+    {
+        var httpJson = """
+        {
+          "service": "http",
+          "description": "HTTP service attacks",
+          "ports": [80, 443, 8080],
+          "serviceNames": ["http", "https"],
+          "targetOs": ["Any"],
+          "vectors": [
+            {
+              "id": "http-enum",
+              "name": "HTTP Enumeration",
+              "phase": "reconnaissance",
+              "prerequisites": [],
+              "description": "Enumerate web service",
+              "commands": [
+                {
+                  "tool": "nmap",
+                  "syntax": "nmap -p <port> --script http-enum,http-headers <target>",
+                  "description": "HTTP enumeration with NSE"
+                }
+              ],
+              "outcomes": ["web_technology"]
+            }
+          ]
+        }
+        """;
+
+        var httpRuleSet = ServiceRuleLoader.LoadFromJson(httpJson);
+        var engine = new ServiceRuleEngine(new List<ServiceRuleSet> { httpRuleSet });
+
+        // State with web ports open
+        var state = new AttackState(
+            CurrentPhase: "reconnaissance",
+            AcquiredItems: new List<string>(),
+            OpenPorts: new List<int> { 80, 443 },
+            Services: new List<string> { "http", "https" },
+            TargetOS: "Any"
+        );
+
+        var vectors = engine.Evaluate(state).ToList();
+        
+        Assert.NotEmpty(vectors);
+        var httpEnumVector = vectors.FirstOrDefault(v => v.Name.Contains("HTTP Enumeration"));
+        Assert.NotNull(httpEnumVector);
+        Assert.Contains(httpEnumVector.Commands, c => c.Syntax.Contains("http-enum"));
+    }
+
+    [Fact]
+    public void SmbPortsProduceSmbclientTips()
+    {
+        var smbJson = """
+        {
+          "service": "smb",
+          "description": "SMB attacks",
+          "ports": [139, 445],
+          "serviceNames": ["smb", "microsoft-ds"],
+          "targetOs": ["Windows"],
+          "vectors": [
+            {
+              "id": "smb-enum",
+              "name": "SMB Share Enumeration",
+              "phase": "reconnaissance",
+              "prerequisites": [],
+              "description": "List SMB shares",
+              "commands": [
+                {
+                  "tool": "smbclient",
+                  "syntax": "smbclient -U '%' -L //<target>",
+                  "description": "List shares anonymously"
+                }
+              ],
+              "outcomes": ["shares_found"]
+            }
+          ]
+        }
+        """;
+
+        var smbRuleSet = ServiceRuleLoader.LoadFromJson(smbJson);
+        var engine = new ServiceRuleEngine(new List<ServiceRuleSet> { smbRuleSet });
+
+        // State with SMB ports open
+        var state = new AttackState(
+            CurrentPhase: "reconnaissance",
+            AcquiredItems: new List<string>(),
+            OpenPorts: new List<int> { 445 },
+            Services: new List<string> { "microsoft-ds" },
+            TargetOS: "Windows"
+        );
+
+        var vectors = engine.Evaluate(state).ToList();
+        
+        Assert.NotEmpty(vectors);
+        var smbVector = vectors.FirstOrDefault(v => v.Name.Contains("SMB"));
+        Assert.NotNull(smbVector);
+        Assert.Contains(smbVector.Commands, c => c.Tool == "smbclient");
+        Assert.Contains(smbVector.Commands, c => c.Syntax.Contains("smbclient"));
+    }
+
+    [Fact]
+    public void OsSpecificPrivescShowsCorrectTools()
+    {
+        var windowsPrivescJson = """
+        {
+          "service": "windows-privesc",
+          "description": "Windows privilege escalation",
+          "ports": [],
+          "serviceNames": [],
+          "targetOs": ["Windows"],
+          "vectors": [
+            {
+              "id": "privesc-winpeas",
+              "name": "WinPEAS Enumeration",
+              "phase": "privilege_escalation",
+              "prerequisites": ["privilege_escalation", "low_privilege_access"],
+              "description": "Automated privilege escalation enumeration",
+              "commands": [
+                {
+                  "tool": "winPEASany.exe",
+                  "syntax": "winPEASany.exe",
+                  "description": "Run WinPEAS"
+                }
+              ],
+              "outcomes": ["information_gathered"]
+            }
+          ]
+        }
+        """;
+
+        var linuxPrivescJson = """
+        {
+          "service": "linux-privesc",
+          "description": "Linux privilege escalation",
+          "ports": [],
+          "serviceNames": [],
+          "targetOs": ["Linux"],
+          "vectors": [
+            {
+              "id": "privesc-linpeas",
+              "name": "LinPEAS Enumeration",
+              "phase": "privilege_escalation",
+              "prerequisites": ["privilege_escalation", "low_privilege_access"],
+              "description": "Automated privilege escalation enumeration",
+              "commands": [
+                {
+                  "tool": "linpeas.sh",
+                  "syntax": "./linpeas.sh",
+                  "description": "Run LinPEAS"
+                }
+              ],
+              "outcomes": ["information_gathered"]
+            }
+          ]
+        }
+        """;
+
+        var windowsRuleSet = ServiceRuleLoader.LoadFromJson(windowsPrivescJson);
+        var linuxRuleSet = ServiceRuleLoader.LoadFromJson(linuxPrivescJson);
+        var engine = new ServiceRuleEngine(new List<ServiceRuleSet> { windowsRuleSet, linuxRuleSet });
+
+        // Test Windows target shows WinPEAS
+        var windowsState = new AttackState(
+            CurrentPhase: "privilege_escalation",
+            AcquiredItems: new List<string> { "low_privilege_access" },
+            OpenPorts: new List<int>(),
+            Services: new List<string>(),
+            TargetOS: "Windows"
+        );
+
+        var windowsVectors = engine.Evaluate(windowsState).ToList();
+        Assert.NotEmpty(windowsVectors);
+        var winpeasVector = windowsVectors.FirstOrDefault(v => v.Name.Contains("WinPEAS"));
+        Assert.NotNull(winpeasVector);
+        Assert.Contains(winpeasVector.Commands, c => c.Tool.Contains("winPEAS"));
+        Assert.DoesNotContain(windowsVectors, v => v.Name.Contains("LinPEAS"));
+
+        // Test Linux target shows LinPEAS
+        var linuxState = new AttackState(
+            CurrentPhase: "privilege_escalation",
+            AcquiredItems: new List<string> { "low_privilege_access" },
+            OpenPorts: new List<int>(),
+            Services: new List<string>(),
+            TargetOS: "Linux"
+        );
+
+        var linuxVectors = engine.Evaluate(linuxState).ToList();
+        Assert.NotEmpty(linuxVectors);
+        var linpeasVector = linuxVectors.FirstOrDefault(v => v.Name.Contains("LinPEAS"));
+        Assert.NotNull(linpeasVector);
+        Assert.Contains(linpeasVector.Commands, c => c.Tool.Contains("linpeas"));
+        Assert.DoesNotContain(linuxVectors, v => v.Name.Contains("WinPEAS"));
+    }
+
+    [Fact]
+    public void NoPortsReturnsGeneralGuidance()
+    {
+        var networkGeneralJson = """
+        {
+          "service": "network-general",
+          "description": "General network reconnaissance",
+          "ports": [],
+          "serviceNames": [],
+          "targetOs": ["Any"],
+          "vectors": [
+            {
+              "id": "network-scan",
+              "name": "Network Discovery",
+              "phase": "reconnaissance",
+              "prerequisites": [],
+              "description": "Discover hosts on the network",
+              "commands": [
+                {
+                  "tool": "nmap",
+                  "syntax": "nmap -sn <ip_range>",
+                  "description": "Ping sweep"
+                }
+              ],
+              "outcomes": ["hosts_discovered"]
+            }
+          ]
+        }
+        """;
+
+        var networkRuleSet = ServiceRuleLoader.LoadFromJson(networkGeneralJson);
+        var engine = new ServiceRuleEngine(new List<ServiceRuleSet> { networkRuleSet });
+
+        // State with no open ports
+        var state = new AttackState(
+            CurrentPhase: "reconnaissance",
+            AcquiredItems: new List<string>(),
+            OpenPorts: new List<int>(),
+            Services: new List<string>(),
+            TargetOS: "Any"
+        );
+
+        var vectors = engine.Evaluate(state).ToList();
+        
+        // Should still return general network vectors even with no specific ports
+        Assert.NotEmpty(vectors);
+        Assert.Contains(vectors, v => v.Name.Contains("Network Discovery"));
+    }
 }

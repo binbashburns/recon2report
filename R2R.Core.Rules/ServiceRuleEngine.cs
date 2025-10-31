@@ -88,26 +88,13 @@ public class ServiceRuleEngine
     /// </summary>
     private bool IsVectorApplicable(AttackVector vector, AttackState state, string currentPhase)
     {
-        // Get the vector's phase from prerequisites or default to reconnaissance
-        var vectorPhase = "reconnaissance";
-        
-        // Check common phase keywords in prerequisites
-        var phaseKeywords = new[] { "reconnaissance", "credential_access", "lateral_movement", 
-                                    "privilege_escalation", "persistence" };
-        
-        foreach (var prereq in vector.Prerequisites)
-        {
-            if (phaseKeywords.Contains(prereq.ToLowerInvariant()))
-            {
-                vectorPhase = prereq.ToLowerInvariant();
-                break;
-            }
-        }
+        // Use the vector's Phase property, defaulting to "reconnaissance" if not set
+        var vectorPhase = vector.Phase?.ToLowerInvariant() ?? "reconnaissance";
 
         // Allow if vector is for current phase
         if (vectorPhase.Equals(currentPhase, StringComparison.OrdinalIgnoreCase))
         {
-            // Check if other prerequisites are met
+            // Check if prerequisites are met
             return CheckPrerequisites(vector.Prerequisites, state);
         }
 

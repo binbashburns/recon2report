@@ -7,6 +7,7 @@ namespace R2R.Core.Domain;
 public record AttackVector(
     string Id,                      // Unique identifier (e.g., "scan_network")
     string Name,                    // Display name (e.g., "Scan network")
+    string? Phase,                  // Phase of the attack (e.g., "reconnaissance"), optional
     List<string> Prerequisites,     // What state/items you need (e.g., ["no_creds"])
     List<Outcome> PossibleOutcomes, // What you might discover (e.g., "Username", "Vulnerable host")
     List<Command> Commands          // Specific tools/commands to run
