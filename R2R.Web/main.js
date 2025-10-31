@@ -267,17 +267,50 @@ function displaySuggestions(vectors) {
         return;
     }
     
-    suggestionsList.innerHTML = vectors.map(vector => `
-        <div class="vector-card">
-            <h3>${vector.name}</h3>
-            ${vector.commands.map(cmd => `
-                <div class="command-item">
-                    <div class="command-tool">${cmd.tool}</div>
-                    <div class="command-syntax">${cmd.readyCommand}</div>
+    // Group vectors by service
+    const grouped = vectors.reduce((acc, vector) => {
+        const service = vector.service || 'General';
+        if (!acc[service]) {
+            acc[service] = [];
+        }
+        acc[service].push(vector);
+        return acc;
+    }, {});
+    
+    // Render grouped vectors
+    suggestionsList.innerHTML = Object.entries(grouped)
+        .map(([service, serviceVectors]) => `
+            <div class="service-group">
+                <h2 class="service-heading">${service}</h2>
+                <div class="service-vectors">
+                    ${serviceVectors.map(vector => `
+                        <div class="vector-card">
+                            <h3>${vector.name}</h3>
+                            ${vector.commands.map(cmd => `
+                                <div class="command-item">
+                                    <div class="command-tool">${cmd.tool}</div>
+                                    <div class="command-syntax" data-command="${escapeHtml(cmd.readyCommand)}">${cmd.readyCommand}</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `).join('')}
                 </div>
-            `).join('')}
-        </div>
-    `).join('');
+            </div>
+        `).join('');
+    
+    // Add click handlers for clipboard functionality
+    document.querySelectorAll('.command-syntax').forEach(el => {
+        el.addEventListener('click', function() {
+            const command = this.getAttribute('data-command');
+            copyToClipboard(command, this);
+        });
+    });
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
 // Initialize

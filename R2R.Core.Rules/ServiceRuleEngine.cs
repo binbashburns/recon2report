@@ -21,7 +21,16 @@ public class ServiceRuleEngine
     /// </summary>
     public List<AttackVector> Evaluate(AttackState state)
     {
-        var applicableVectors = new List<AttackVector>();
+        return EvaluateWithService(state).Select(vs => vs.Vector).ToList();
+    }
+
+    /// <summary>
+    /// Evaluates attack state and returns applicable vectors with their service names.
+    /// Only loads vectors from services that have open ports.
+    /// </summary>
+    public List<(AttackVector Vector, string ServiceName)> EvaluateWithService(AttackState state)
+    {
+        var applicableVectors = new List<(AttackVector, string)>();
 
         // Get the current phase
         var currentPhase = DeterminePhaseFromState(state);
@@ -40,7 +49,7 @@ public class ServiceRuleEngine
                 if (IsVectorApplicable(vector, state, currentPhase) && 
                     IsOsCompatible(serviceRuleSet.TargetOs, state.TargetOS))
                 {
-                    applicableVectors.Add(vector);
+                    applicableVectors.Add((vector, serviceRuleSet.Service));
                 }
             }
         }
