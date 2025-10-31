@@ -9,6 +9,17 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+// Add CORS policy for frontend development
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowFrontend", policy =>
+    {
+        policy.WithOrigins("http://localhost:5173")
+              .AllowAnyHeader()
+              .AllowAnyMethod();
+    });
+});
+
 var app = builder.Build();
 
 // Load service-based rule sets at startup
@@ -43,6 +54,9 @@ Console.WriteLine($"\nRule engine initialized with {serviceRuleSets.Count} servi
 // Enable Swagger UI
 app.UseSwagger();
 app.UseSwaggerUI();
+
+// Enable CORS
+app.UseCors("AllowFrontend");
 
 // Ephemeral store backing the API; data is lost once the process stops.
 var db = new InMemoryDb();
