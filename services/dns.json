@@ -1,0 +1,69 @@
+{
+  "service": "DNS",
+  "description": "Domain Name System service",
+  "ports": [53],
+  "serviceNames": ["dns", "domain"],
+  "targetOs": ["Any"],
+  "vectors": [
+    {
+      "id": "dns_zone_transfer",
+      "name": "DNS Zone Transfer",
+      "phase": "reconnaissance",
+      "prerequisites": [],
+      "description": "Attempt to retrieve all DNS records via zone transfer",
+      "commands": [
+        {
+          "tool": "dig",
+          "syntax": "dig axfr <domain_name> @<target>",
+          "description": "Request full zone transfer"
+        },
+        {
+          "tool": "host",
+          "syntax": "host -l <domain_name> <target>",
+          "description": "Alternative zone transfer method"
+        }
+      ],
+      "outcomes": ["dns_records", "subdomain_list", "internal_ips"]
+    },
+    {
+      "id": "dns_enumeration",
+      "name": "DNS Subdomain Enumeration",
+      "phase": "reconnaissance",
+      "prerequisites": [],
+      "description": "Discover subdomains",
+      "commands": [
+        {
+          "tool": "dnsrecon",
+          "syntax": "dnsrecon -d <domain_name> -t std",
+          "description": "Standard DNS enumeration"
+        },
+        {
+          "tool": "dnsenum",
+          "syntax": "dnsenum <domain_name>",
+          "description": "DNS enumeration tool"
+        },
+        {
+          "tool": "fierce",
+          "syntax": "fierce --domain <domain_name>",
+          "description": "DNS reconnaissance"
+        }
+      ],
+      "outcomes": ["subdomain_list", "internal_ips"]
+    },
+    {
+      "id": "dns_cache_snooping",
+      "name": "DNS Cache Snooping",
+      "phase": "reconnaissance",
+      "prerequisites": [],
+      "description": "Discover what domains have been recently queried",
+      "commands": [
+        {
+          "tool": "nmap",
+          "syntax": "nmap -sU -p 53 --script dns-cache-snoop --script-args 'dns-cache-snoop.mode=timed,dns-cache-snoop.domains={google.com,facebook.com}' <target>",
+          "description": "Check DNS cache for specific domains"
+        }
+      ],
+      "outcomes": ["cached_domains"]
+    }
+  ]
+}

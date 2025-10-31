@@ -1,0 +1,44 @@
+{
+  "service": "FTP",
+  "description": "File Transfer Protocol",
+  "ports": [21],
+  "serviceNames": ["ftp"],
+  "targetOs": ["Any"],
+  "vectors": [
+    {
+      "id": "ftp_anonymous",
+      "name": "FTP Anonymous Access",
+      "phase": "reconnaissance",
+      "prerequisites": [],
+      "description": "Test for anonymous FTP access",
+      "commands": [
+        {
+          "tool": "ftp",
+          "syntax": "ftp <target>",
+          "description": "Connect with anonymous:anonymous"
+        },
+        {
+          "tool": "nmap",
+          "syntax": "nmap -p 21 --script ftp-anon <target>",
+          "description": "Check anonymous FTP with NSE"
+        }
+      ],
+      "outcomes": ["anonymous_access", "file_list"]
+    },
+    {
+      "id": "ftp_bruteforce",
+      "name": "FTP Password Bruteforce",
+      "phase": "credential_access",
+      "prerequisites": [],
+      "description": "Bruteforce FTP credentials",
+      "commands": [
+        {
+          "tool": "hydra",
+          "syntax": "hydra -l <user> -P <password_list> ftp://<target>",
+          "description": "FTP password bruteforce"
+        }
+      ],
+      "outcomes": ["valid_credentials", "ftp_access"]
+    }
+  ]
+}

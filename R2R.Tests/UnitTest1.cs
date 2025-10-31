@@ -6,19 +6,42 @@ using R2R.Core.Rules;
 public class NmapParserTests
 {
     [Fact]
-    public void ParsesOpenPortsFromNormalOutput()
+    public void ParsesOpenPortsFromXmlOutput()
     {
         var sample = """
-        Starting Nmap 7.94
-        Nmap scan report for 10.10.10.10
-        PORT     STATE SERVICE  VERSION
-        22/tcp   open  ssh      OpenSSH 8.4p1
-        80/tcp   open  http     Apache httpd 2.4.41
-        111/tcp  closed rpcbind
-        53/udp   open  domain
+        <?xml version="1.0" encoding="UTF-8"?>
+        <nmaprun scanner="nmap" args="nmap -sV 10.10.10.10" version="7.94">
+        <host>
+            <status state="up"/>
+            <address addr="10.10.10.10" addrtype="ipv4"/>
+            <hostnames>
+                <hostname name="test.example.com"/>
+            </hostnames>
+            <ports>
+                <port protocol="tcp" portid="22">
+                    <state state="open"/>
+                    <service name="ssh" product="OpenSSH" version="8.4p1"/>
+                </port>
+                <port protocol="tcp" portid="80">
+                    <state state="open"/>
+                    <service name="http" product="Apache httpd" version="2.4.41"/>
+                </port>
+                <port protocol="tcp" portid="111">
+                    <state state="closed"/>
+                    <service name="rpcbind"/>
+                </port>
+                <port protocol="udp" portid="53">
+                    <state state="open"/>
+                    <service name="domain"/>
+                </port>
+            </ports>
+        </host>
+        </nmaprun>
         """;
 
-        var ports = NmapParser.Parse(sample);
+        var hosts = NmapParser.ParseMultipleHosts(sample);
+        Assert.Single(hosts); // Should find exactly one host
+        var ports = hosts[0].Ports;
         Assert.Contains(ports, p => p.Number == 22 && p.Protocol == "tcp" && p.Service == "ssh");
         Assert.Contains(ports, p => p.Number == 80 && p.Protocol == "tcp" && p.Service == "http");
         Assert.Contains(ports, p => p.Number == 53 && p.Protocol == "udp" && p.Service == "domain");
@@ -26,103 +49,184 @@ public class NmapParserTests
     }
 }
 
-public class MarkdownParserTests
+public class ServiceRuleLoaderTests
 {
     [Fact]
-    public void ParsesSimpleMarkdownIntoRuleSet()
+    public void ParsesJsonIntoServiceRuleSet()
     {
-        var markdown = """
-        # Test Rules
-        
-        ## Scan network >>> Vulnerable host
-        - `nmap -sP <ip>`
-        - `nxc smb <ip_range>`
-        
-        ## Anonymous SMB >>> Username
-        - `smbclient -L //<ip> -N`
+        var json = """
+        {
+          "service": "test-service",
+          "description": "Test service for unit testing",
+          "ports": [22, 80],
+          "serviceNames": ["ssh", "http"],
+          "targetOs": ["linux", "windows"],
+          "vectors": [
+            {
+              "id": "test-scan",
+              "name": "Network Scan",
+              "phase": "reconnaissance",
+              "prerequisites": ["network_access"],
+              "description": "Scan the network for hosts",
+              "commands": [
+                {
+                  "tool": "nmap",
+                  "command": "nmap -sP <ip>",
+                  "description": "Ping scan"
+                }
+              ],
+              "outcomes": ["hosts_discovered"]
+            },
+            {
+              "id": "test-smb",
+              "name": "Anonymous SMB Access",
+              "phase": "reconnaissance",
+              "prerequisites": ["network_access"],
+              "description": "Test anonymous SMB access",
+              "commands": [
+                {
+                  "tool": "smbclient",
+                  "command": "smbclient -L //<ip> -N",
+                  "description": "List SMB shares"
+                }
+              ],
+              "outcomes": ["credential_access"]
+            }
+          ]
+        }
         """;
 
-        var ruleSet = MarkdownRuleLoader.ParseMarkdown("test", markdown);
+        var ruleSet = ServiceRuleLoader.LoadFromJson(json);
         
-        Assert.Equal("test", ruleSet.Id);
+        Assert.Equal("test-service", ruleSet.Service);
         Assert.Equal(2, ruleSet.Vectors.Count);
+        Assert.Contains(22, ruleSet.Ports);
+        Assert.Contains(80, ruleSet.Ports);
         
-        var scanVector = ruleSet.Vectors.First(v => v.Name == "Scan network");
+        var scanVector = ruleSet.Vectors.First(v => v.Name == "Network Scan");
         Assert.NotNull(scanVector);
-        Assert.Contains("Vulnerable host", scanVector.PossibleOutcomes.Select(o => o.DisplayName));
-        Assert.True(scanVector.Commands.Count >= 2);
+        Assert.Contains("hosts_discovered", scanVector.PossibleOutcomes.Select(o => o.StateId));
+        Assert.Single(scanVector.Commands);
     }
 }
 
-public class RuleEngineTests
+public class ServiceRuleEngineTests
 {
     [Fact]
-    public void EvaluatesNoCredsStateAndReturnsScanVectors()
+    public void LoadsOnlyRelevantServicesBasedOnPorts()
     {
-        var markdown = """
-        # No Credentials
-        
-        ## Scan network >>> Vulnerable host
-        - `nmap -sP <ip>`
-        
-        ## Anonymous SMB >>> Username
-        - `smbclient -L //<ip> -N`
+        var sshJson = """
+        {
+          "service": "ssh",
+          "description": "SSH service attacks",
+          "ports": [22],
+          "serviceNames": ["ssh"],
+          "targetOs": ["linux", "windows"],
+          "vectors": [
+            {
+              "id": "ssh-scan",
+              "name": "SSH Enumeration",
+              "phase": "reconnaissance",
+              "prerequisites": ["network_access"],
+              "description": "Enumerate SSH",
+              "commands": [{"tool": "nmap", "command": "nmap -p22 <ip>", "description": "Scan SSH"}],
+              "outcomes": ["information_gathered"]
+            }
+          ]
+        }
         """;
 
-        var ruleSet = MarkdownRuleLoader.ParseMarkdown("no_creds", markdown);
-        
-        // Debug: verify the parser extracted vectors correctly
-        Assert.NotEmpty(ruleSet.Vectors);
-        Assert.Equal("nocreds", ruleSet.InitialState);
-        
-        var engine = new RuleEngine(new List<RuleSet> { ruleSet });
+        var httpJson = """
+        {
+          "service": "http",
+          "description": "HTTP service attacks",
+          "ports": [80, 443],
+          "serviceNames": ["http", "https"],
+          "targetOs": ["linux", "windows"],
+          "vectors": [
+            {
+              "id": "http-scan",
+              "name": "Web Directory Bruteforce",
+              "phase": "reconnaissance",
+              "prerequisites": ["network_access"],
+              "description": "Bruteforce directories",
+              "commands": [{"tool": "gobuster", "command": "gobuster dir -u http://<ip>", "description": "Scan dirs"}],
+              "outcomes": ["information_gathered"]
+            }
+          ]
+        }
+        """;
 
+        var sshRuleSet = ServiceRuleLoader.LoadFromJson(sshJson);
+        var httpRuleSet = ServiceRuleLoader.LoadFromJson(httpJson);
+        var engine = new ServiceRuleEngine(new List<ServiceRuleSet> { sshRuleSet, httpRuleSet });
+
+        // State with only port 80 open - should only load HTTP service
         var state = new AttackState(
-            CurrentPhase: "nocreds",  // Match what parser generates
-            AcquiredItems: new List<string>(),
-            OpenPorts: new List<int>(),
-            Services: new List<string>(),
-            TargetOS: null
+            CurrentPhase: "reconnaissance",
+            AcquiredItems: new List<string> { "network_access" },
+            OpenPorts: new List<int> { 80 },
+            Services: new List<string> { "http" },
+            TargetOS: "linux"
         );
 
-        var vectors = engine.Evaluate(state);
+        var vectors = engine.Evaluate(state).ToList();
         
         Assert.NotEmpty(vectors);
-        Assert.Contains(vectors, v => v.Name.Contains("Scan network"));
+        Assert.Contains(vectors, v => v.Name.Contains("Web"));
+        Assert.DoesNotContain(vectors, v => v.Name.Contains("SSH"));
     }
 
     [Fact]
-    public void FiltersVectorsByOpenPorts()
+    public void FiltersVectorsByPhaseAndPrerequisites()
     {
-        var markdown = """
-        # No Credentials
-        
-        ## Scan network
-        - `nmap -sP <ip>`
-        
-        ## Anonymous SMB access
-        - `smbclient -L //<ip> -N`
+        var json = """
+        {
+          "service": "smb",
+          "description": "SMB attacks",
+          "ports": [445],
+          "serviceNames": ["microsoft-ds"],
+          "targetOs": ["windows"],
+          "vectors": [
+            {
+              "id": "smb-anon",
+              "name": "Anonymous SMB Enumeration",
+              "phase": "reconnaissance",
+              "prerequisites": ["network_access"],
+              "description": "Anonymous SMB access",
+              "commands": [{"tool": "smbclient", "command": "smbclient -L //<ip> -N", "description": "List shares"}],
+              "outcomes": ["information_gathered"]
+            },
+            {
+              "id": "smb-auth",
+              "name": "Authenticated SMB Enumeration",
+              "phase": "credential_access",
+              "prerequisites": ["valid_credentials"],
+              "description": "Enumerate with creds",
+              "commands": [{"tool": "nxc", "command": "nxc smb <ip> -u <user> -p <pass>", "description": "Enumerate"}],
+              "outcomes": ["credential_access"]
+            }
+          ]
+        }
         """;
 
-        var ruleSet = MarkdownRuleLoader.ParseMarkdown("no_creds", markdown);
-        var engine = new RuleEngine(new List<RuleSet> { ruleSet });
+        var ruleSet = ServiceRuleLoader.LoadFromJson(json);
+        var engine = new ServiceRuleEngine(new List<ServiceRuleSet> { ruleSet });
 
+        // State in reconnaissance phase without valid credentials
         var state = new AttackState(
-            CurrentPhase: "nocreds",  // Match what parser generates
-            AcquiredItems: new List<string>(),
-            OpenPorts: new List<int> { 445, 139 },
-            Services: new List<string>(),
-            TargetOS: null
+            CurrentPhase: "reconnaissance",
+            AcquiredItems: new List<string> { "network_access" },
+            OpenPorts: new List<int> { 445 },
+            Services: new List<string> { "microsoft-ds" },
+            TargetOS: "windows"
         );
 
-        // First get all vectors that apply to this state
-        var allVectors = engine.Evaluate(state);
-        Assert.NotEmpty(allVectors);
+        var vectors = engine.Evaluate(state).ToList();
         
-        // Then filter by ports
-        var vectors = engine.GetVectorsForPorts(state, new List<int> { 445 });
-        
-        // Should prioritize SMB-related vectors when port 445 is open
-        Assert.Contains(vectors, v => v.Name.Contains("SMB", StringComparison.OrdinalIgnoreCase));
+        // Should only return reconnaissance vectors with network_access prerequisite
+        Assert.NotEmpty(vectors);
+        Assert.Contains(vectors, v => v.Name.Contains("Anonymous"));
+        Assert.DoesNotContain(vectors, v => v.Name.Contains("Authenticated"));
     }
 }

