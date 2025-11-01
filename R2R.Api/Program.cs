@@ -3,11 +3,12 @@ using System.Xml.Linq;
 using R2R.Core.Domain;
 using R2R.Core.Parsing;
 using R2R.Core.Rules;
+using R2R.Api;
 
 // Bootstraps the minimal API host and exposes Swagger for interactive testing.
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerDocumentation();
 
 // Add CORS policy for frontend development
 builder.Services.AddCors(options =>
@@ -69,7 +70,8 @@ app.MapPost("/sessions", (Session s) =>
     s = s with { Id = id };
     db.Sessions[id] = s;
     return Results.Created($"/sessions/{id}", s);
-});
+})
+.WithSessionExamples();
 
 // Quick fetch for session metadata by identifier.
 app.MapGet("/sessions/{id}", (string id) =>
@@ -109,7 +111,8 @@ app.MapPost("/targets", (Target t) =>
     t = t with { Id = id };
     db.Targets[id] = t;
     return Results.Created($"/targets/{id}", t);
-});
+})
+.WithTargetExamples();
 
 // Fetches target metadata for the recon report or UI.
 app.MapGet("/targets/{id}", (string id) =>
@@ -204,7 +207,8 @@ app.MapPost("/targets/{id}/scan", (string id, ParseRequest req) => {
     }
     
     return Results.BadRequest("No hosts found in scan output");
-});
+})
+.WithScanUploadExamples();
 
 // Retrieve stored scan results for a target
 app.MapGet("/targets/{id}/scan", (string id) => {
@@ -219,7 +223,8 @@ app.MapGet("/targets/{id}/scan", (string id) => {
 app.MapPost("/nmap/suggest", (SuggestRequest req) => {
     var cmds = NmapCommandBuilder.Build(req.Ip, req.Os);
     return Results.Ok(cmds);
-});
+})
+.WithNmapSuggestExamples();
 
 // ---- Rule Engine: Suggest attack paths based on current state ----
 // Uses loaded service rule sets to suggest applicable attack vectors
@@ -266,7 +271,8 @@ app.MapPost("/attack-paths/suggest", (AttackPathRequest req) => {
             }).ToList()
         }).ToList()
     });
-});
+})
+.WithAttackPathSuggestExamples();
 
 // ---- Rule Engine: Get all vectors for a phase (reference/dictionary mode) ----
 // Returns all vectors for a given phase without filtering by ports/services
@@ -292,7 +298,8 @@ app.MapGet("/attack-paths/all", (string? phase) => {
             }).ToList()
         }).ToList()
     });
-});
+})
+.WithAttackPathsAllExamples();
 
 // Helper to get a description for a vector
 string GetVectorDescription(AttackVector vector)
