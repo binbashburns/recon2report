@@ -8,7 +8,8 @@ let state = {
     targetOs: null,
     phase: 'reconnaissance',
     ports: [],
-    allHosts: [] // Store all discovered hosts
+    allHosts: [], // Store all discovered hosts
+    hostContexts: {} // Store context per host: { "192.168.1.10": { username: "...", ... } }
 };
 
 // Utility functions
@@ -24,6 +25,19 @@ function showStatus(message, type = 'success') {
 window.goToScreen = function(screenId) {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     document.getElementById(screenId).classList.add('active');
+    
+    // Update sub-nav active state if it exists on this screen
+    const activeScreen = document.getElementById(screenId);
+    const subNav = activeScreen.querySelector('.sub-nav');
+    if (subNav) {
+        subNav.querySelectorAll('a').forEach(link => {
+            link.classList.remove('active');
+            // Check if this link points to the current screen
+            if (link.getAttribute('onclick').includes(screenId)) {
+                link.classList.add('active');
+            }
+        });
+    }
 }
 
 // Screen 1: Create Session & Target
@@ -209,7 +223,7 @@ function displayPorts() {
     }
     
     // Display all hosts with nested ports
-    portsList.innerHTML = state.allHosts.map(host => `
+    portsList.innerHTML = state.allHosts.map((host, index) => `
         <div class="host-card">
             <div class="host-header">
                 <h3>${host.ipAddress}${host.hostname ? ` (${host.hostname})` : ''}</h3>
@@ -223,11 +237,81 @@ function displayPorts() {
                     </div>
                 `).join('') : '<p class="no-ports">No open ports detected</p>'}
             </div>
+            <div class="host-actions">
+                <button class="btn btn-primary btn-host-vectors" data-host-index="${index}">
+                    Get Attack Vectors for ${host.ipAddress}
+                </button>
+            </div>
         </div>
     `).join('');
+    
+    // Add click handlers for host-specific attack vector buttons
+    document.querySelectorAll('.btn-host-vectors').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const hostIndex = parseInt(this.getAttribute('data-host-index'));
+            getSuggestionsForHost(hostIndex);
+        });
+    });
+    
+    // Update hosts page dropdown
+    updateHostsDropdown();
 }
 
-// Screen 5: Get attack suggestions
+// Get attack suggestions for a specific host
+async function getSuggestionsForHost(hostIndex) {
+    const host = state.allHosts[hostIndex];
+    
+    if (!host) {
+        showStatus('Host not found', 'error');
+        return;
+    }
+    
+    // Get saved context for this host
+    const context = state.hostContexts[host.ipAddress] || {};
+    
+    // Build acquiredItems based on what context we have
+    const acquiredItems = [];
+    if (context.username) acquiredItems.push('username');
+    if (context.password) acquiredItems.push('password');
+    if (context.hash) acquiredItems.push('hash');
+    if (context.domain) acquiredItems.push('domain_info');
+    
+    try {
+        const res = await fetch(`${API_BASE}/attack-paths/suggest`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                currentPhase: state.phase,
+                acquiredItems: acquiredItems, // Now includes context-based items
+                openPorts: host.ports.map(p => p.number),
+                services: host.ports.map(p => p.service).filter(s => s && s !== 'unknown'),
+                targetOS: context.osVersion || state.targetOs, // Use context OS if available
+                targetIp: host.ipAddress,
+                domainName: context.domain || null, // Include domain from context
+                sessionId: state.sessionId
+            })
+        });
+        
+        if (!res.ok) throw new Error('Failed to get suggestions');
+        
+        const data = await res.json();
+        
+        // Store the current host's IP for display
+        state.currentHostIp = host.ipAddress;
+        
+        // Update the target host display
+        const hostDisplay = document.getElementById('target-host-display');
+        hostDisplay.textContent = `Target: ${host.ipAddress}`;
+        hostDisplay.style.display = 'block';
+        
+        displaySuggestions(data.applicableVectors || []);
+        goToScreen('suggestions');
+    } catch (error) {
+        showStatus(`Error: ${error.message}`, 'error');
+    }
+}
+
+// Screen 5: Get attack suggestions (legacy - for backward compatibility)
 window.getSuggestions = async function() {
     try {
         const res = await fetch(`${API_BASE}/attack-paths/suggest`, {
@@ -247,6 +331,11 @@ window.getSuggestions = async function() {
         if (!res.ok) throw new Error('Failed to get suggestions');
         
         const data = await res.json();
+        
+        // Hide the target host display for legacy calls
+        const hostDisplay = document.getElementById('target-host-display');
+        hostDisplay.style.display = 'none';
+        
         displaySuggestions(data.applicableVectors || []);
         goToScreen('suggestions');
     } catch (error) {
@@ -256,6 +345,17 @@ window.getSuggestions = async function() {
 
 window.updatePhase = async function() {
     state.phase = document.getElementById('phase-select').value;
+    
+    // If we have a current host IP, refresh suggestions for that specific host
+    if (state.currentHostIp) {
+        const hostIndex = state.allHosts.findIndex(h => h.ipAddress === state.currentHostIp);
+        if (hostIndex !== -1) {
+            await getSuggestionsForHost(hostIndex);
+            return;
+        }
+    }
+    
+    // Otherwise fall back to legacy behavior
     await getSuggestions();
 }
 
@@ -311,6 +411,146 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// Screen 6: Reference / Dictionary Mode
+window.loadReferenceVectors = async function() {
+    const phase = document.getElementById('reference-phase-select').value;
+    
+    try {
+        const res = await fetch(`${API_BASE}/attack-paths/all?phase=${phase}`, {
+            method: 'GET'
+        });
+        
+        if (!res.ok) throw new Error('Failed to load reference vectors');
+        
+        const data = await res.json();
+        displayReferenceVectors(data.vectors || []);
+    } catch (error) {
+        showStatus(`Error: ${error.message}`, 'error');
+    }
+}
+
+function displayReferenceVectors(vectors) {
+    const referenceList = document.getElementById('reference-list');
+    
+    if (vectors.length === 0) {
+        referenceList.innerHTML = '<div class="empty-state"><h3>No vectors found for this phase</h3></div>';
+        return;
+    }
+    
+    // Group by service (same as suggestions page)
+    const grouped = vectors.reduce((acc, vector) => {
+        const service = vector.service || 'General';
+        if (!acc[service]) {
+            acc[service] = [];
+        }
+        acc[service].push(vector);
+        return acc;
+    }, {});
+    
+    // Render with raw syntax (no variable substitution)
+    referenceList.innerHTML = Object.entries(grouped)
+        .map(([service, serviceVectors]) => `
+            <div class="service-group">
+                <h2 class="service-heading">${service}</h2>
+                <div class="service-vectors">
+                    ${serviceVectors.map(vector => `
+                        <div class="vector-card">
+                            <h3>${vector.name}</h3>
+                            ${vector.description ? `<p class="vector-description">${vector.description}</p>` : ''}
+                            ${vector.commands.map(cmd => `
+                                <div class="command-item">
+                                    <div class="command-tool">${cmd.tool}</div>
+                                    <div class="command-syntax-raw">${cmd.syntax}</div>
+                                    ${cmd.description ? `<div class="command-desc">${cmd.description}</div>` : ''}
+                                </div>
+                            `).join('')}
+                            ${vector.prerequisites && vector.prerequisites.length > 0 ? `
+                                <div class="prerequisites">
+                                    <strong>Prerequisites:</strong> ${vector.prerequisites.join(', ')}
+                                </div>
+                            ` : ''}
+                            ${vector.possibleOutcomes && vector.possibleOutcomes.length > 0 ? `
+                                <div class="outcomes">
+                                    <strong>Possible Outcomes:</strong> ${vector.possibleOutcomes.join(', ')}
+                                </div>
+                            ` : ''}
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `).join('');
+}
+
+// Screen 6: Hosts Management Page
+function updateHostsDropdown() {
+    const select = document.getElementById('host-select');
+    const noHostsDiv = document.getElementById('no-hosts-available');
+    
+    if (state.allHosts.length === 0) {
+        select.innerHTML = '<option value="">-- No hosts available --</option>';
+        noHostsDiv.style.display = 'block';
+        return;
+    }
+    
+    noHostsDiv.style.display = 'none';
+    select.innerHTML = '<option value="">-- Select a host --</option>' +
+        state.allHosts.map((host, index) => 
+            `<option value="${index}">${host.ipAddress}${host.hostname ? ` (${host.hostname})` : ''}</option>`
+        ).join('');
+}
+
+// Load host information when selected
+window.loadHostInfo = function() {
+    const selectedIndex = document.getElementById('host-select').value;
+    const container = document.getElementById('host-info-container');
+    
+    if (!selectedIndex || selectedIndex === '') {
+        container.style.display = 'none';
+        return;
+    }
+    
+    container.style.display = 'block';
+    
+    const host = state.allHosts[parseInt(selectedIndex)];
+    const context = state.hostContexts[host.ipAddress] || {};
+    
+    // Populate readonly fields from scan
+    document.getElementById('host-ip').value = host.ipAddress || '';
+    document.getElementById('host-hostname').value = host.hostname || 'N/A';
+    document.getElementById('host-ports-count').value = `${host.portsDetected} port(s) open`;
+    
+    // Populate editable fields from context or leave empty
+    document.getElementById('host-os').value = context.osVersion || '';
+    document.getElementById('host-username').value = context.username || '';
+    document.getElementById('host-password').value = context.password || '';
+    document.getElementById('host-domain').value = context.domain || '';
+    document.getElementById('host-hash').value = context.hash || '';
+    document.getElementById('host-notes').value = context.notes || '';
+}
+
+// Save host information
+window.saveHostInfo = function() {
+    const selectedIndex = document.getElementById('host-select').value;
+    
+    if (!selectedIndex || selectedIndex === '') {
+        showStatus('Please select a host first', 'error');
+        return;
+    }
+    
+    const host = state.allHosts[parseInt(selectedIndex)];
+    
+    state.hostContexts[host.ipAddress] = {
+        osVersion: document.getElementById('host-os').value,
+        username: document.getElementById('host-username').value,
+        password: document.getElementById('host-password').value,
+        domain: document.getElementById('host-domain').value,
+        hash: document.getElementById('host-hash').value,
+        notes: document.getElementById('host-notes').value
+    };
+    
+    showStatus(`Information saved for ${host.ipAddress}`);
 }
 
 // Initialize

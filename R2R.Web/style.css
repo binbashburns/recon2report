@@ -47,6 +47,57 @@ header h1 {
     font-size: 1.1rem;
 }
 
+nav {
+    display: flex;
+    gap: 1.5rem;
+    justify-content: center;
+    margin-top: 1.5rem;
+}
+
+nav a {
+    color: var(--primary);
+    text-decoration: none;
+    font-weight: 500;
+    padding: 0.5rem 1rem;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+}
+
+nav a:hover {
+    background: var(--background);
+}
+
+/* Sub Navigation (for post-scan screens) */
+.sub-nav {
+    display: flex;
+    gap: 0.5rem;
+    margin: -1rem -1rem 2rem -1rem;
+    padding: 0;
+    border-bottom: 2px solid var(--border);
+    background: var(--background);
+}
+
+.sub-nav a {
+    color: var(--text);
+    text-decoration: none;
+    padding: 0.75rem 1.5rem;
+    border-bottom: 3px solid transparent;
+    margin-bottom: -2px;
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+.sub-nav a:hover {
+    background: rgba(37, 99, 235, 0.05);
+    color: var(--primary);
+}
+
+.sub-nav a.active {
+    color: var(--primary);
+    border-bottom-color: var(--primary);
+    background: var(--surface);
+}
+
 .screen {
     display: none;
     background: var(--surface);
@@ -225,6 +276,17 @@ code {
     padding: 1rem;
 }
 
+.host-actions {
+    padding: 1rem 1.5rem;
+    background: var(--background);
+    border-top: 1px solid var(--border);
+}
+
+.btn-host-vectors {
+    width: 100%;
+    justify-content: center;
+}
+
 /* Nmap Commands */
 .nmap-command-card {
     border: 1px solid var(--border);
@@ -378,4 +440,64 @@ code {
 .empty-state h3 {
     color: var(--text);
     margin-bottom: 0.5rem;
+}
+
+/* Reference Page */
+.command-syntax-raw {
+    font-family: 'Courier New', monospace;
+    font-size: 0.9rem;
+    color: var(--text);
+    word-break: break-all;
+    padding: 0.5rem;
+    background: var(--code-bg);
+    border-radius: 4px;
+}
+
+.prerequisites,
+.outcomes {
+    margin-top: 0.75rem;
+    padding: 0.75rem;
+    background: var(--background);
+    border-left: 3px solid var(--primary);
+    border-radius: 4px;
+    font-size: 0.9rem;
+}
+
+.prerequisites strong,
+.outcomes strong {
+    color: var(--primary);
+    display: block;
+    margin-bottom: 0.25rem;
+}
+
+/* Hosts Page */
+.host-info-section {
+    background: var(--background);
+    padding: 1.5rem;
+    border-radius: 6px;
+    margin-bottom: 1.5rem;
+}
+
+.host-info-section h3 {
+    color: var(--text);
+    margin-bottom: 1rem;
+    font-size: 1.1rem;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.5rem;
+}
+
+.info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1rem;
+}
+
+.info-grid .form-group {
+    margin-bottom: 0;
+}
+
+input[readonly] {
+    background: var(--background);
+    color: var(--text-light);
+    cursor: not-allowed;
 }

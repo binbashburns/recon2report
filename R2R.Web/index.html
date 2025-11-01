@@ -11,6 +11,11 @@
         <header>
             <h1>recon2report ⓡ②ⓡ</h1>
             <p class="tagline">Better pentesting, from recon to reporting</p>
+            <nav>
+                <a href="#" onclick="goToScreen('session-form')">Home</a>
+                <a href="#" onclick="goToScreen('hosts')">Hosts</a>
+                <a href="#" onclick="goToScreen('reference')">Attack Vector Reference</a>
+            </nav>
         </header>
 
         <main id="main-content">
@@ -70,17 +75,27 @@
 
             <!-- Screen 4: Parsed Ports -->
             <section id="parsed-ports" class="screen">
+                <nav class="sub-nav">
+                    <a href="#" class="active" onclick="goToScreen('parsed-ports')">Detected Ports & Services</a>
+                    <a href="#" onclick="goToScreen('hosts')">Host Info</a>
+                    <a href="#" onclick="goToScreen('suggestions')">Attack Vectors</a>
+                </nav>
                 <h2>Detected Ports & Services</h2>
                 <div id="ports-list"></div>
                 <div class="button-group">
                     <button type="button" class="btn btn-secondary" onclick="goToScreen('nmap-paste')">Back</button>
-                    <button type="button" class="btn btn-primary" onclick="getSuggestions()">Get Attack Vectors</button>
                 </div>
             </section>
 
             <!-- Screen 5: Suggestions / Next Steps -->
             <section id="suggestions" class="screen">
+                <nav class="sub-nav">
+                    <a href="#" onclick="goToScreen('parsed-ports')">Detected Ports & Services</a>
+                    <a href="#" onclick="goToScreen('hosts')">Host Info</a>
+                    <a href="#" class="active" onclick="goToScreen('suggestions')">Attack Vectors</a>
+                </nav>
                 <h2>Attack Path Suggestions</h2>
+                <p id="target-host-display" class="hint" style="display: none;"></p>
                 <div class="phase-selector">
                     <label for="phase-select">Current Phase:</label>
                     <select id="phase-select" onchange="updatePhase()">
@@ -95,6 +110,116 @@
                 <div class="button-group">
                     <button type="button" class="btn btn-secondary" onclick="goToScreen('parsed-ports')">Back</button>
                     <button type="button" class="btn btn-primary" onclick="goToScreen('session-form')">New Session</button>
+                </div>
+            </section>
+
+            <!-- Screen 6: Hosts Management -->
+            <section id="hosts" class="screen">
+                <nav class="sub-nav">
+                    <a href="#" onclick="goToScreen('parsed-ports')">Detected Ports & Services</a>
+                    <a href="#" class="active" onclick="goToScreen('hosts')">Host Info</a>
+                    <a href="#" onclick="goToScreen('suggestions')">Attack Vectors</a>
+                </nav>
+                <h2>Host Information</h2>
+                <p class="hint">View and update information for discovered hosts</p>
+                
+                <!-- Host Selector -->
+                <div class="form-group">
+                    <label for="host-select">Select Host:</label>
+                    <select id="host-select" onchange="loadHostInfo()">
+                        <option value="">-- Select a host --</option>
+                    </select>
+                </div>
+                
+                <div id="host-info-container" style="display: none;">
+                    <div class="host-info-section">
+                        <h3>Basic Information</h3>
+                        <div class="info-grid">
+                            <div class="form-group">
+                                <label for="host-ip">IP Address:</label>
+                                <input type="text" id="host-ip" readonly>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="host-hostname">Hostname:</label>
+                                <input type="text" id="host-hostname" readonly>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="host-os">Operating System:</label>
+                                <input type="text" id="host-os" placeholder="e.g., Windows Server 2019, Ubuntu 20.04">
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="host-ports-count">Open Ports:</label>
+                                <input type="text" id="host-ports-count" readonly>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="host-info-section">
+                        <h3>Credentials & Access</h3>
+                        <div class="info-grid">
+                            <div class="form-group">
+                                <label for="host-username">Username(s):</label>
+                                <textarea id="host-username" rows="2" placeholder="e.g., administrator, john.doe"></textarea>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="host-password">Password(s):</label>
+                                <textarea id="host-password" rows="2" placeholder="e.g., P@ssw0rd123"></textarea>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="host-domain">Domain:</label>
+                                <input type="text" id="host-domain" placeholder="e.g., CORP.LOCAL">
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="host-hash">Hash(es):</label>
+                                <textarea id="host-hash" rows="2" placeholder="e.g., NTLM hashes"></textarea>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="host-info-section">
+                        <h3>Additional Notes</h3>
+                        <div class="form-group">
+                            <label for="host-notes">Notes:</label>
+                            <textarea id="host-notes" rows="4" placeholder="Any other relevant information..."></textarea>
+                        </div>
+                    </div>
+                    
+                    <div class="button-group">
+                        <button type="button" class="btn btn-primary" onclick="saveHostInfo()">Save Changes</button>
+                        <button type="button" class="btn btn-secondary" onclick="goToScreen('session-form')">Back to Home</button>
+                    </div>
+                </div>
+                
+                <div id="no-hosts-available" class="empty-state">
+                    <h3>No hosts available</h3>
+                    <p>Scan some hosts first to manage their information</p>
+                    <button type="button" class="btn btn-primary" onclick="goToScreen('session-form')">Create Session</button>
+                </div>
+            </section>
+
+            <!-- Screen 7: Attack Vector Reference / Dictionary -->
+            <section id="reference" class="screen">
+                <h2>All Attacks</h2>
+                <p class="hint">Complete catalog of all attack vectors by phase (commands show placeholder syntax)</p>
+                <div class="phase-selector">
+                    <label for="reference-phase-select">Phase:</label>
+                    <select id="reference-phase-select" onchange="loadReferenceVectors()">
+                        <option value="reconnaissance">Reconnaissance</option>
+                        <option value="credential_access">Credential Access</option>
+                        <option value="lateral_movement">Lateral Movement</option>
+                        <option value="privilege_escalation">Privilege Escalation</option>
+                        <option value="persistence">Persistence</option>
+                    </select>
+                </div>
+                <div id="reference-list"></div>
+                <div class="button-group">
+                    <button type="button" class="btn btn-secondary" onclick="goToScreen('session-form')">Back to Home</button>
                 </div>
             </section>
         </main>
