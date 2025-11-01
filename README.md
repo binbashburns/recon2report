@@ -67,6 +67,8 @@ recon2report transforms Nmap scan results into context-aware penetration testing
 
 All data lives in memory; restarting the API clears it.
 
+> **For Web UI development setup, configuration, and troubleshooting**, see [adrs/0003-web-ui-development.md](./adrs/0003-web-ui-development.md)
+
 ## Attack Path System
 
 The system uses **service-based JSON files** in `/services/` to define attack paths dynamically. This allows you to maintain attack techniques without changing code, with better organization and performance.
@@ -228,13 +230,13 @@ services/                 JSON files defining service-based attack vectors
 adrs/                     Architecture Decision Records
   ├── 0000-architecture-overview.md
   ├── 0001-adding-services.md
-  └── 0002-web-frontend.md
+  ├── 0002-web-frontend.md
+  └── 0003-web-ui-development.md
 ```
 
 ## Troubleshooting
 - **403 from CLI**: Ensure the API is running and that `R2R_API_BASE` matches its URL (defaults to `http://localhost:5258/`).
-- **CORS errors in browser**: Verify the API is running with CORS enabled for `http://localhost:5173`.
-- **Web UI not loading**: Run `npm install` in `R2R.Web/` first, then `npm run dev`.
+- **Web UI issues**: See [Web UI Development Guide](./adrs/0003-web-ui-development.md#common-issues) for CORS errors, port conflicts, and configuration.
 - **Swagger/Swashbuckle build errors**: The project relies on `Microsoft.AspNetCore.OpenApi` only; make sure no other Swagger packages are referenced.
 - **dotnet test errors**: Confirm the API project builds; missing types are usually due to visibility changes in `Program.cs`.
 
