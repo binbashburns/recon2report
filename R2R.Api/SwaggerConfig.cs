@@ -295,4 +295,44 @@ Commands show raw syntax with placeholders (`<ip>`, `<domain>`, `<port>`).
             return operation;
         });
     }
+
+    /// <summary>
+    /// Enriches the POST /evidence endpoint with examples.
+    /// </summary>
+    public static RouteHandlerBuilder WithEvidenceExamples(this RouteHandlerBuilder builder)
+    {
+        return builder.WithOpenApi(operation =>
+        {
+            operation.Summary = "Upload evidence (screenshot/data) for report generation";
+            operation.Description = @"
+**Prerequisites**: Must have a target (POST /targets).
+
+Stores evidence with base64-encoded image data for penetration test reports.
+
+**Validation**:
+- Image format: PNG, JPG, JPEG, GIF
+- Size limit: 5MB maximum
+- Data URL format: `data:image/{type};base64,{data}`
+
+**Valid stages**: information_gathering, enumeration, exploitation, privilege_escalation, post_exploitation, maintaining_access, house_cleaning
+
+**Testing tip**: Use a tool like `base64 -i screenshot.png` (macOS/Linux) or convert your image to base64, then format as `data:image/png;base64,{YOUR_BASE64_HERE}`
+";
+
+            // Create a valid base64 PNG (50x50 gradient square - ~400 bytes, realistic for testing)
+            var sampleBase64 = "iVBORw0KGgoAAAANSUhEUgAAADIAAAAyCAYAAAAeP4ixAAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAALEgAACxIB0t1+/AAAABx0RVh0U29mdHdhcmUAQWRvYmUgRmlyZXdvcmtzIENTNui8sowAAAAWdEVYdENyZWF0aW9uIFRpbWUAMDMvMTQvMTNJ5sWcAAAAvElEQVRoge3YsQ2AMAxE0RNYgJUZgE0ZgX1ZhQlYgAr3FkSRECDEv5LOsiXn3Vmymz5ERERERERERERERERERERERERERERERERERERERERE9GsN2Cv2kJ1iH9kZ9pPdYE/ZHfaVvWBv2Qc2lH1hb9kXNpZ9YXPZFzaYfWGT2Rc2mn1hs9kXNpx9YdPZFzaefWHz2Rc+gH3hE9gXPoJ94TPYF76Dfek72Je+g33pO9iXvoN96TsRERERERERERE9ugFRmzIbCwplbQAAAABJRU5ErkJggg==";
+            
+            var exampleRequest = new OpenApiObject
+            {
+                ["targetId"] = new OpenApiString("abc123"),
+                ["stage"] = new OpenApiString("exploitation"),
+                ["caption"] = new OpenApiString("Successful remote code execution via SMB exploit - reverse shell obtained"),
+                ["dataUrl"] = new OpenApiString($"data:image/png;base64,{sampleBase64}")
+            };
+
+            operation.RequestBody.Content["application/json"].Example = exampleRequest;
+
+            return operation;
+        });
+    }
 }

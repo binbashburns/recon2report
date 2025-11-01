@@ -350,6 +350,103 @@ app.MapGet("/debug/services", () => {
     });
 });
 
+// ---- Evidence Management ----
+// Store evidence items (screenshots, data excerpts) for report generation
+app.MapPost("/evidence", (EvidenceRequest req) => {
+    // Validate target exists
+    if (!db.Targets.ContainsKey(req.TargetId))
+        return Results.BadRequest("Target not found");
+    
+    // Validate stage
+    var validStages = new[] { 
+        "information_gathering", 
+        "enumeration", 
+        "exploitation", 
+        "privilege_escalation", 
+        "post_exploitation",
+        "maintaining_access",
+        "house_cleaning"
+    };
+    var stage = req.Stage?.ToLowerInvariant();
+    if (string.IsNullOrWhiteSpace(stage) || !validStages.Contains(stage))
+        return Results.BadRequest($"Invalid stage. Valid stages: {string.Join(", ", validStages)}");
+    
+    // Validate caption
+    if (string.IsNullOrWhiteSpace(req.Caption))
+        return Results.BadRequest("Caption is required");
+    
+    // Validate data URL
+    var (isValid, errorMessage) = DataUrlValidator.Validate(req.DataUrl);
+    if (!isValid)
+        return Results.BadRequest(errorMessage);
+    
+    // Create evidence
+    var id = Guid.NewGuid().ToString("n");
+    var evidence = new Evidence(
+        Id: id,
+        TargetId: req.TargetId,
+        Stage: stage,
+        Caption: req.Caption,
+        DataUrl: req.DataUrl,
+        CreatedAt: DateTime.UtcNow
+    );
+    
+    db.Evidence[id] = evidence;
+    
+    return Results.Created($"/evidence/{id}", evidence);
+})
+.WithEvidenceExamples();
+
+// Get single evidence item
+app.MapGet("/evidence/{id}", (string id) => {
+    if (!db.Evidence.TryGetValue(id, out var evidence))
+        return Results.NotFound();
+    return Results.Ok(evidence);
+});
+
+// Get all evidence for a target
+app.MapGet("/targets/{id}/evidence", (string id) => {
+    if (!db.Targets.ContainsKey(id))
+        return Results.NotFound("Target not found");
+    
+    var targetEvidence = db.Evidence.Values
+        .Where(e => e.TargetId == id)
+        .OrderBy(e => e.CreatedAt)
+        .ToList();
+    
+    return Results.Ok(new {
+        TargetId = id,
+        EvidenceCount = targetEvidence.Count,
+        Evidence = targetEvidence
+    });
+});
+
+// Get all evidence for a session
+app.MapGet("/sessions/{id}/evidence", (string id) => {
+    if (!db.Sessions.ContainsKey(id))
+        return Results.NotFound("Session not found");
+    
+    // Get all targets for this session
+    var sessionTargetIds = db.Targets.Values
+        .Where(t => t.SessionId == id)
+        .Select(t => t.Id)
+        .ToHashSet();
+    
+    // Get all evidence for these targets
+    var sessionEvidence = db.Evidence.Values
+        .Where(e => sessionTargetIds.Contains(e.TargetId))
+        .OrderBy(e => e.TargetId)
+        .ThenBy(e => e.CreatedAt)
+        .ToList();
+    
+    return Results.Ok(new {
+        SessionId = id,
+        TargetCount = sessionTargetIds.Count,
+        EvidenceCount = sessionEvidence.Count,
+        Evidence = sessionEvidence
+    });
+});
+
 // Helper function to substitute common variables in command templates
 static string SubstituteVariables(string template, string? targetIp, string? domain, string? ipRange, List<int>? openPorts = null)
 {
@@ -400,11 +497,26 @@ public record AttackPathRequest(
 );
 public record Session(string Id, string Name, string? IpRange = null);
 public record Target(string Id, string SessionId, string Ip, string Os, List<OpenPort>? Ports = null);
+public record Evidence(
+    string Id,
+    string TargetId,
+    string Stage,           // e.g., "information_gathering", "enumeration", "exploitation", "privilege_escalation", "post_exploitation"
+    string Caption,
+    string DataUrl,         // base64 data URL (data:image/png;base64,...)
+    DateTime CreatedAt
+);
+public record EvidenceRequest(
+    string TargetId,
+    string Stage,
+    string Caption,
+    string DataUrl
+);
 
 // Tiny persistence wrapper so endpoints can share mutable state.
 class InMemoryDb {
     public Dictionary<string, Session> Sessions { get; } = new();
     public Dictionary<string, Target>  Targets  { get; } = new();
+    public Dictionary<string, Evidence> Evidence { get; } = new();
 }
 
 // --------- Helpers (Phase 1 general guidance) ----------
@@ -612,5 +724,46 @@ public static class IpValidator
     {
         if (string.IsNullOrWhiteSpace(ip)) return false;
         return IpAddressPattern.IsMatch(ip.Trim());
+    }
+}
+
+// Validates base64 data URLs for evidence screenshots (supports PNG, JPG, JPEG, GIF)
+public static class DataUrlValidator
+{
+    private static readonly Regex DataUrlPattern = new(
+        @"^data:image/(png|jpe?g|gif);base64,([A-Za-z0-9+/=]+)$",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    
+    private const int MaxSizeBytes = 5 * 1024 * 1024; // 5MB limit
+    private const int MinSizeBytes = 100; // Minimum 100 bytes (prevents empty/invalid images)
+
+    public static (bool IsValid, string? ErrorMessage) Validate(string? dataUrl)
+    {
+        if (string.IsNullOrWhiteSpace(dataUrl))
+            return (false, "Data URL is required");
+
+        var match = DataUrlPattern.Match(dataUrl);
+        if (!match.Success)
+            return (false, "Invalid data URL format. Expected: data:image/{png|jpg|jpeg|gif};base64,{data}");
+
+        var base64Data = match.Groups[2].Value;
+        
+        // Validate base64 encoding
+        try
+        {
+            var bytes = Convert.FromBase64String(base64Data);
+            
+            if (bytes.Length < MinSizeBytes)
+                return (false, $"Image too small (minimum {MinSizeBytes} bytes)");
+            
+            if (bytes.Length > MaxSizeBytes)
+                return (false, $"Image too large (maximum {MaxSizeBytes / 1024 / 1024}MB)");
+            
+            return (true, null);
+        }
+        catch (FormatException)
+        {
+            return (false, "Invalid base64 encoding");
+        }
     }
 }
