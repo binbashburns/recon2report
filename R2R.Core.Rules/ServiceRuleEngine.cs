@@ -58,6 +58,32 @@ public class ServiceRuleEngine
     }
 
     /// <summary>
+    /// Gets all vectors for a specific phase across all services (no filtering).
+    /// Used for reference/dictionary mode to show all available vectors.
+    /// </summary>
+    public List<(AttackVector Vector, string ServiceName)> GetAllVectorsForPhase(string phase)
+    {
+        var allVectors = new List<(AttackVector, string)>();
+        var targetPhase = phase.ToLowerInvariant();
+
+        foreach (var serviceRuleSet in _serviceRuleSets)
+        {
+            foreach (var vector in serviceRuleSet.Vectors)
+            {
+                // Use the vector's Phase property
+                var vectorPhase = vector.Phase?.ToLowerInvariant() ?? "reconnaissance";
+                
+                if (vectorPhase.Equals(targetPhase, StringComparison.OrdinalIgnoreCase))
+                {
+                    allVectors.Add((vector, serviceRuleSet.Service));
+                }
+            }
+        }
+
+        return allVectors;
+    }
+
+    /// <summary>
     /// Gets service rule sets that match the open ports/services in the attack state.
     /// Always includes "Network General" service.
     /// </summary>

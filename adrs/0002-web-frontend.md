@@ -52,12 +52,15 @@ R2R.Web/
 1. **Session + Target Form** - Create session with IP/OS
 2. **Nmap Suggestions** - Show scan commands from API (`/nmap/suggest`)
 3. **Paste Nmap XML** - Upload scan results
-4. **Parsed Ports** - Display all hosts with nested port lists
-5. **Attack Suggestions** - Show phase-based vectors (`/attack-paths/suggest`)
+4. **Parsed Ports** - Display all hosts with nested port lists, per-host attack vector buttons
+5. **Attack Suggestions** - Show phase-based vectors for selected host (`/attack-paths/suggest`)
+6. **Attack Vector Reference** - Dictionary view of all vectors by phase with raw syntax (`/attack-paths/all`)
 
 ### Key Features
 
 - **Multi-host support** - Single scan displays all discovered hosts
+- **Per-host attack vectors** - Each host has its own "Get Attack Vectors" button
+- **Reference dictionary** - Browse all attack vectors without filtering by target
 - **Nested port display** - Each host card shows ports, services, versions
 - **Phase selector** - Switch between recon/creds/lateral/privesc/persistence
 - **Click-to-copy** - Copy commands to clipboard
@@ -69,12 +72,15 @@ R2R.Web/
 - `POST /targets` - Create target
 - `POST /nmap/suggest` - Get scan commands
 - `POST /targets/{id}/scan` - Upload Nmap XML
-- `POST /attack-paths/suggest` - Get attack vectors
+- `POST /attack-paths/suggest` - Get filtered attack vectors for specific host
+- `GET /attack-paths/all?phase={phase}` - Get all vectors for reference mode
 
 ## Notes
 
 - CORS configured in API for `http://localhost:5173`
 - Refreshing page loses state (matches in-memory API design)
+- Reference page shows raw command syntax with `<target>`, `<domain>` placeholders
+- Attack suggestions page substitutes actual values into commands
 - Multi-host scans display all hosts; attack suggestions use first host by default
 
 ## Future

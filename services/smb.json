@@ -28,8 +28,8 @@
           "description": "List shares anonymously"
         },
         {
-          "tool": "enum4linux-ng",
-          "syntax": "enum4linux-ng.py -a -u '' -p '' <target>",
+          "tool": "enum4linux",
+          "syntax": "enum4linux -a -u '' -p '' <target>",
           "description": "Comprehensive SMB enumeration"
         }
       ],

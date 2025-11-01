@@ -268,6 +268,40 @@ app.MapPost("/attack-paths/suggest", (AttackPathRequest req) => {
     });
 });
 
+// ---- Rule Engine: Get all vectors for a phase (reference/dictionary mode) ----
+// Returns all vectors for a given phase without filtering by ports/services
+app.MapGet("/attack-paths/all", (string? phase) => {
+    var currentPhase = phase?.ToLowerInvariant() ?? "reconnaissance";
+    
+    // Get all vectors for this phase from all services (no filtering)
+    var allVectors = ruleEngine.GetAllVectorsForPhase(currentPhase);
+    
+    return Results.Ok(new {
+        Phase = currentPhase,
+        Vectors = allVectors.Select(vs => new {
+            vs.Vector.Id,
+            vs.Vector.Name,
+            Description = GetVectorDescription(vs.Vector),
+            vs.Vector.Prerequisites,
+            Service = vs.ServiceName,
+            PossibleOutcomes = vs.Vector.PossibleOutcomes.Select(o => o.DisplayName).ToList(),
+            Commands = vs.Vector.Commands.Select(c => new {
+                c.Tool,
+                Syntax = c.Syntax, // Raw syntax with placeholders
+                c.Description
+            }).ToList()
+        }).ToList()
+    });
+});
+
+// Helper to get a description for a vector
+string GetVectorDescription(AttackVector vector)
+{
+    // Check if any command has a description we can use
+    var cmdDesc = vector.Commands.FirstOrDefault()?.Description;
+    return cmdDesc ?? $"Attack vector for {vector.Name}";
+}
+
 // Get ALL vectors for a phase (no prerequisite filtering) - for reference/cheatsheet mode
 app.MapGet("/attack-paths/phase/{phase}", (string phase) => {
     var allVectors = ruleEngine.GetVectorsForPhase(phase);
