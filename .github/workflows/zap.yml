@@ -37,7 +37,7 @@ jobs:
       - name: Wait for API readiness
         run: |
           for i in {1..40}; do
-            if curl -fsS "${{ env.API_URL }}${{ env.HEALTH_PATH }}" >/dev/null; then
+            if curl -fsS "http://localhost:${{ env.API_PORT }}${{ env.HEALTH_PATH }}" >/dev/null; then
               echo "API ready"
               exit 0
             fi
