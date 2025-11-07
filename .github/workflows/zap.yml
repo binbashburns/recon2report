@@ -51,6 +51,7 @@ jobs:
       - name: ZAP baseline scan (non-failing)
         run: |
           mkdir -p zap-reports
+          chmod 777 zap-reports
           docker run --rm \
             --add-host=host.docker.internal:host-gateway \
             -v "$(pwd)/zap-reports:/zap/wrk:rw" \
@@ -63,6 +64,7 @@ jobs:
         # -d debug, -I ignore some rules, -q quiet
         # "|| true" ensures the step never fails the job
         # --add-host allows container to reach host.docker.internal
+        # chmod 777 fixes ZAP container write permissions
 
       - name: Upload ZAP HTML
         uses: actions/upload-artifact@v4
@@ -88,7 +90,7 @@ jobs:
       #     ZAP_OPENAPI_URL: ${{ env.API_URL }}/swagger/v1/swagger.json
       #   run: |
       #     docker run --rm --add-host=host.docker.internal:host-gateway \
-      #       owasp/zap2docker-stable \
+      #       ghcr.io/zaproxy/zaproxy:stable \
       #       zap-api-scan.py \
       #         -t ${{ env.ZAP_OPENAPI_URL }} \
       #         -f openapi \
