@@ -62,6 +62,14 @@ app.UseCors("AllowFrontend");
 // Ephemeral store backing the API; data is lost once the process stops.
 var db = new InMemoryDb();
 
+// ---- Health Check ----
+// Simple health endpoint for monitoring and CI/CD
+app.MapGet("/health", () => Results.Ok(new { 
+    status = "healthy", 
+    timestamp = DateTime.UtcNow,
+    version = "1.0.0"
+}));
+
 // ---- In-memory CRUD ----
 // Session endpoints track a single pentest/assessment run and are managed in memory.
 app.MapPost("/sessions", (Session s) =>
@@ -445,6 +453,13 @@ app.MapGet("/sessions/{id}/evidence", (string id) => {
         EvidenceCount = sessionEvidence.Count,
         Evidence = sessionEvidence
     });
+});
+
+// Delete evidence item
+app.MapDelete("/evidence/{id}", (string id) => {
+    if (!db.Evidence.Remove(id))
+        return Results.NotFound("Evidence not found");
+    return Results.NoContent();
 });
 
 // Helper function to substitute common variables in command templates

@@ -1,0 +1,98 @@
+name: ZAP API Scan (PR)
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - '.github/workflows/**'
+
+jobs:
+  zap-baseline:
+    name: Baseline ZAP scan (non-failing)
+    runs-on: ubuntu-latest
+    env:
+      API_PROJECT: R2R.Api/R2R.Api.csproj   # Fixed: no src/ folder
+      API_PORT: 5000
+      API_URL: http://host.docker.internal:5000
+      HEALTH_PATH: /health                   # Health check endpoint
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.x'              # Fixed: project uses .NET 9.0
+
+      - name: Build
+        run: dotnet build --configuration Release
+
+      - name: Start API (background)
+        run: |
+          nohup dotnet run --project "${{ env.API_PROJECT }}" --urls "http://0.0.0.0:${{ env.API_PORT }}" > api.log 2>&1 &
+          echo $! > api.pid
+
+      - name: Wait for API readiness
+        run: |
+          for i in {1..40}; do
+            if curl -fsS "${{ env.API_URL }}${{ env.HEALTH_PATH }}" >/dev/null; then
+              echo "API ready"
+              exit 0
+            fi
+            echo "Waiting for API..."
+            sleep 3
+          done
+          echo "API did not become ready"
+          cat api.log || true
+          exit 1
+
+      - name: ZAP baseline scan (non-failing)
+        run: |
+          mkdir -p zap-reports
+          docker run --rm \
+            --add-host=host.docker.internal:host-gateway \
+            -v "$(pwd)/zap-reports:/zap/wrk:rw" \
+            owasp/zap2docker-stable \
+            zap-baseline.py \
+              -t "${{ env.API_URL }}" \
+              -r baseline-report.html \
+              -j baseline-report.json \
+              -d -I -q || true
+        # -d debug, -I ignore some rules, -q quiet
+        # "|| true" ensures the step never fails the job
+        # --add-host allows container to reach host.docker.internal
+
+      - name: Upload ZAP HTML
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-baseline-html
+          path: zap-reports/baseline-report.html
+
+      - name: Upload ZAP JSON
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-baseline-json
+          path: zap-reports/baseline-report.json
+
+      - name: Upload API log
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-log
+          path: api.log
+
+      # --- Optional: quick OpenAPI import during baseline (still non-failing) ---
+      # - name: Import OpenAPI (optional, keeps job non-failing)
+      #   env:
+      #     ZAP_OPENAPI_URL: ${{ env.API_URL }}/swagger/v1/swagger.json
+      #   run: |
+      #     docker run --rm --add-host=host.docker.internal:host-gateway \
+      #       owasp/zap2docker-stable \
+      #       zap-api-scan.py \
+      #         -t ${{ env.ZAP_OPENAPI_URL }} \
+      #         -f openapi \
+      #         -r openapi-report.html \
+      #         -w openapi-report.md || true
+      #
+      # For deeper API coverage with authentication, prefer a separate scheduled job.
