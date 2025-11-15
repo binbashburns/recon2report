@@ -119,7 +119,7 @@ jobs:
             const apiResults = processZapReport('zap-reports/api-scan-report.json', 'API');
             
             // Create comprehensive comment
-            let comment = `## 🔒 ZAP Security Scan Results\n\n`;
+            let comment = `## ⚡️ ZAP Security Scan Results\n\n`;
             comment += `**Scan completed:** ${new Date().toLocaleString()}\n`;
             comment += `**Target:** \`${{ env.API_URL }}\`\n\n`;
             
@@ -168,9 +168,16 @@ jobs:
             }
             
             comment += `### 📋 Full Reports\n`;
-            comment += `- 📊 **HTML Reports:** Available in workflow artifacts\n`;
-            comment += `- 🔗 **Workflow Details:** [View run](${context.payload.repository.html_url}/actions/runs/${context.runId})\n`;
-            comment += `- 📖 **Learn More:** [OWASP ZAP Documentation](https://www.zaproxy.org/docs/)\n`;
+            comment += `- 📊 **HTML Reports:** [Download ZAP Security Reports](${context.payload.repository.html_url}/actions/runs/${context.runId}#artifacts)\n`;
+            comment += `- 📄 **API Logs:** [Download API Logs](${context.payload.repository.html_url}/actions/runs/${context.runId}#artifacts)\n`;
+            comment += `- 🔗 **Workflow Details:** [View complete run](${context.payload.repository.html_url}/actions/runs/${context.runId})\n`;
+            comment += `- 📖 **Learn More:** [OWASP ZAP Documentation](https://www.zaproxy.org/docs/)\n\n`;
+            comment += `<details>\n`;
+            comment += `<summary>📦 Available Artifacts</summary>\n\n`;
+            comment += `- \`zap-security-reports\` - Contains baseline-report.html, api-scan-report.html, and JSON reports\n`;
+            comment += `- \`api-logs\` - API startup and runtime logs\n\n`;
+            comment += `Click the artifacts link above to download these files.\n`;
+            comment += `</details>`;
             
             // Post the comment
             await github.rest.issues.createComment({
