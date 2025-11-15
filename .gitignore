@@ -76,3 +76,7 @@ lerna-debug.log*
 
 # Macs are weird
 .DS_Store
+
+# ZAP stuff
+/zap-reports/*
+api.log
