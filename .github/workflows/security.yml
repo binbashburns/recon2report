@@ -31,7 +31,6 @@ jobs:
             p/secrets
             p/owasp-top-ten
             p/csharp
-            p/dotnet
 
       - name: Comment on PR
         if: github.event_name == 'pull_request' && failure()
