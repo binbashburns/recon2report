@@ -117,19 +117,23 @@
             <section id="hosts" class="screen">
                 <nav class="sub-nav">
                     <a href="#" onclick="goToScreen('parsed-ports')">Detected Ports & Services</a>
-                    <a href="#" class="active" onclick="goToScreen('hosts')">Host Info</a>
+                    <a href="#" class="active" onclick="showHostTab('info')">Host Info</a>
                     <a href="#" onclick="goToScreen('suggestions')">Attack Vectors</a>
+                    <a href="#" onclick="showHostTab('evidence')">Evidence</a>
                 </nav>
-                <h2>Host Information</h2>
-                <p class="hint">View and update information for discovered hosts</p>
                 
-                <!-- Host Selector -->
+                <!-- Host Selector (shared across tabs) -->
                 <div class="form-group">
                     <label for="host-select">Select Host:</label>
                     <select id="host-select" onchange="loadHostInfo()">
                         <option value="">-- Select a host --</option>
                     </select>
                 </div>
+                
+                <!-- Tab: Host Info -->
+                <div id="host-tab-info" class="host-tab active">
+                    <h2>Host Information</h2>
+                    <p class="hint">View and update information for discovered hosts</p>
                 
                 <div id="host-info-container" style="display: none;">
                     <div class="host-info-section">
@@ -201,6 +205,55 @@
                     <p>Scan some hosts first to manage their information</p>
                     <button type="button" class="btn btn-primary" onclick="goToScreen('session-form')">Create Session</button>
                 </div>
+                </div>
+                
+                <!-- Tab: Evidence -->
+                <div id="host-tab-evidence" class="host-tab">
+                    <h2>Evidence Management</h2>
+                    <p class="hint">Upload and manage screenshots for the selected host</p>
+                    
+                    <!-- Upload Form -->
+                    <div class="evidence-upload-section">
+                        <h3>Upload Evidence</h3>
+                        
+                        <div class="form-group">
+                            <label for="evidence-stage-select">Stage:</label>
+                            <select id="evidence-stage-select">
+                                <option value="information_gathering">Information Gathering</option>
+                                <option value="enumeration">Enumeration</option>
+                                <option value="exploitation">Exploitation</option>
+                                <option value="privilege_escalation">Privilege Escalation</option>
+                                <option value="post_exploitation">Post-Exploitation</option>
+                                <option value="maintaining_access">Maintaining Access</option>
+                                <option value="house_cleaning">House Cleaning</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="evidence-caption">Caption:</label>
+                            <textarea id="evidence-caption" rows="3" placeholder="Describe what this evidence shows..." required></textarea>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="evidence-file">Image File (PNG, JPG, GIF - max 5MB):</label>
+                            <input type="file" id="evidence-file" accept="image/png,image/jpeg,image/jpg,image/gif" required>
+                            <div id="evidence-preview" style="margin-top: 0.5rem;"></div>
+                        </div>
+                        
+                        <div class="button-group">
+                            <button type="button" class="btn btn-primary" onclick="uploadEvidence()">Upload Evidence</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Evidence Display -->
+                    <div class="evidence-display-section">
+                        <h3>Evidence for This Host</h3>
+                        <div id="evidence-list" class="evidence-container"></div>
+                        <div id="no-evidence-message" class="empty-state" style="display: none;">
+                            <p>No evidence uploaded yet for this host</p>
+                        </div>
+                    </div>
+                </div>
             </section>
 
             <!-- Screen 7: Attack Vector Reference / Dictionary -->
@@ -222,6 +275,11 @@
                     <button type="button" class="btn btn-secondary" onclick="goToScreen('session-form')">Back to Home</button>
                 </div>
             </section>
+
+            <!-- Screen 8: Evidence Management -->
+                        <!-- Screen 7: Attack Vector Reference / Dictionary -->
+            <section id="reference" class="screen">
+
         </main>
 
         <div id="status" class="status"></div>

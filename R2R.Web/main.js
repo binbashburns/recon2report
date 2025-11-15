@@ -9,7 +9,8 @@ let state = {
     phase: 'reconnaissance',
     ports: [],
     allHosts: [], // Store all discovered hosts
-    hostContexts: {} // Store context per host: { "192.168.1.10": { username: "...", ... } }
+    hostContexts: {}, // Store context per host: { "192.168.1.10": { username: "...", ... } }
+    evidence: {} // Store evidence per target: { targetId: [ {id, stage, caption, dataUrl}, ... ] }
 };
 
 // Utility functions
@@ -37,6 +38,44 @@ window.goToScreen = function(screenId) {
                 link.classList.add('active');
             }
         });
+    }
+    
+    // Special handling for evidence screen
+    if (screenId === 'evidence') {
+        updateEvidenceTargetDropdown();
+    }
+    
+    // Special handling for hosts screen - default to info tab
+    if (screenId === 'hosts') {
+        showHostTab('info');
+    }
+}
+
+// Host tab switching
+window.showHostTab = function(tabName) {
+    // Remove active class from all tabs
+    document.querySelectorAll('.host-tab').forEach(tab => tab.classList.remove('active'));
+    
+    // Add active class to selected tab
+    const selectedTab = document.getElementById(`host-tab-${tabName}`);
+    if (selectedTab) {
+        selectedTab.classList.add('active');
+    }
+    
+    // Update sub-nav active state
+    document.querySelectorAll('.sub-nav a').forEach(link => {
+        link.classList.remove('active');
+        if (link.getAttribute('onclick')?.includes(tabName)) {
+            link.classList.add('active');
+        }
+    });
+    
+    // Load evidence if switching to evidence tab
+    if (tabName === 'evidence') {
+        const hostSelect = document.getElementById('host-select');
+        if (hostSelect.value) {
+            loadEvidenceForTarget();
+        }
     }
 }
 
@@ -552,5 +591,295 @@ window.saveHostInfo = function() {
     
     showStatus(`Information saved for ${host.ipAddress}`);
 }
+
+// ---- Evidence Management ----
+
+// Populate evidence target selector when screen loads
+window.goToEvidenceScreen = function() {
+    goToScreen('evidence');
+    updateEvidenceTargetDropdown();
+};
+
+function updateEvidenceTargetDropdown() {
+    const select = document.getElementById('evidence-target-select');
+    
+    if (state.allHosts.length === 0) {
+        select.innerHTML = '<option value="">-- No hosts available --</option>';
+        return;
+    }
+    
+    select.innerHTML = '<option value="">-- Select a target --</option>' +
+        state.allHosts.map((host, index) => 
+            `<option value="${host.targetId}">${host.ipAddress}${host.hostname ? ` (${host.hostname})` : ''}</option>`
+        ).join('');
+}
+
+// File picker preview
+document.addEventListener('DOMContentLoaded', () => {
+    const fileInput = document.getElementById('evidence-file');
+    if (fileInput) {
+        fileInput.addEventListener('change', function(e) {
+            const preview = document.getElementById('evidence-preview');
+            const file = e.target.files[0];
+            
+            if (!file) {
+                preview.innerHTML = '';
+                return;
+            }
+            
+            // Show file info
+            const sizeMB = (file.size / 1024 / 1024).toFixed(2);
+            preview.innerHTML = `<small>Selected: ${file.name} (${sizeMB}MB)</small>`;
+            
+            // Validate size
+            if (file.size > 5 * 1024 * 1024) {
+                preview.innerHTML += '<br><small style="color: var(--error);"> File is larger than 5MB</small>';
+            }
+        });
+    }
+});
+
+// Convert file to data URL
+function convertFileToDataUrl(file) {
+    return new Promise((resolve, reject) => {
+        const validTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif'];
+        
+        if (!validTypes.includes(file.type)) {
+            reject('Invalid file type. Please use PNG, JPG, or GIF');
+            return;
+        }
+        
+        const maxSize = 5 * 1024 * 1024; // 5MB
+        if (file.size > maxSize) {
+            reject('File too large. Maximum size is 5MB');
+            return;
+        }
+        
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result);
+        reader.onerror = () => reject('Failed to read file');
+        reader.readAsDataURL(file);
+    });
+}
+
+// Upload evidence
+window.uploadEvidence = async function() {
+    const targetId = document.getElementById('evidence-target-select').value;
+    const stage = document.getElementById('evidence-stage-select').value;
+    const caption = document.getElementById('evidence-caption').value.trim();
+    const fileInput = document.getElementById('evidence-file');
+    const file = fileInput.files[0];
+    
+    // Validation
+    if (!targetId) {
+        showStatus('Please select a target', 'error');
+        return;
+    }
+    
+    if (!caption) {
+        showStatus('Please enter a caption', 'error');
+        return;
+    }
+    
+    if (!file) {
+        showStatus('Please select an image file', 'error');
+        return;
+    }
+    
+    try {
+        showStatus('Converting image...', 'info');
+        const dataUrl = await convertFileToDataUrl(file);
+        
+        showStatus('Uploading evidence...', 'info');
+        const res = await fetch(`${API_BASE}/evidence`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                targetId: targetId,
+                stage: stage,
+                caption: caption,
+                dataUrl: dataUrl
+            })
+        });
+        
+        if (!res.ok) {
+            const errorText = await res.text();
+            throw new Error(errorText || 'Upload failed');
+        }
+        
+        const evidence = await res.json();
+        
+        // Add to local state
+        if (!state.evidence[targetId]) {
+            state.evidence[targetId] = [];
+        }
+        state.evidence[targetId].push(evidence);
+        
+        // Clear form
+        document.getElementById('evidence-caption').value = '';
+        fileInput.value = '';
+        document.getElementById('evidence-preview').innerHTML = '';
+        
+        // Refresh display
+        loadEvidenceForTarget();
+        showStatus('Evidence uploaded successfully!');
+        
+    } catch (error) {
+        showStatus(`Error: ${error.message}`, 'error');
+    }
+};
+
+// Load evidence for selected target
+window.loadEvidenceForTarget = async function() {
+    const targetId = document.getElementById('evidence-target-select').value;
+    
+    if (!targetId) {
+        document.getElementById('evidence-list').innerHTML = '';
+        document.getElementById('no-evidence-message').style.display = 'block';
+        document.getElementById('evidence-target-name').textContent = 'Selected Target';
+        return;
+    }
+    
+    // Update target name display
+    const host = state.allHosts.find(h => h.targetId === targetId);
+    document.getElementById('evidence-target-name').textContent = 
+        host ? `${host.ipAddress}${host.hostname ? ` (${host.hostname})` : ''}` : 'Selected Target';
+    
+    try {
+        const res = await fetch(`${API_BASE}/targets/${targetId}/evidence`);
+        
+        if (!res.ok) throw new Error('Failed to load evidence');
+        
+        const data = await res.json();
+        state.evidence[targetId] = data.evidence || [];
+        
+        displayEvidence(targetId);
+        
+    } catch (error) {
+        showStatus(`Error: ${error.message}`, 'error');
+    }
+};
+
+// Display evidence grouped by stage
+function displayEvidence(targetId) {
+    const container = document.getElementById('evidence-list');
+    const noEvidenceMsg = document.getElementById('no-evidence-message');
+    const evidenceItems = state.evidence[targetId] || [];
+    
+    if (evidenceItems.length === 0) {
+        container.innerHTML = '';
+        noEvidenceMsg.style.display = 'block';
+        return;
+    }
+    
+    noEvidenceMsg.style.display = 'none';
+    
+    // Group by stage
+    const grouped = evidenceItems.reduce((acc, ev) => {
+        if (!acc[ev.stage]) acc[ev.stage] = [];
+        acc[ev.stage].push(ev);
+        return acc;
+    }, {});
+    
+    // Stage order for consistent display
+    const stageOrder = [
+        'information_gathering',
+        'enumeration',
+        'exploitation',
+        'privilege_escalation',
+        'post_exploitation',
+        'maintaining_access',
+        'house_cleaning'
+    ];
+    
+    // Render grouped evidence
+    container.innerHTML = stageOrder
+        .filter(stage => grouped[stage])
+        .map(stage => `
+            <div class="evidence-stage-group">
+                <h3 class="evidence-stage-heading">${formatStageName(stage)}</h3>
+                <div class="evidence-thumbnails">
+                    ${grouped[stage].map(ev => `
+                        <div class="evidence-item">
+                            <img src="${ev.dataUrl}" 
+                                 alt="${escapeHtml(ev.caption)}" 
+                                 class="evidence-thumb"
+                                 onclick="viewEvidenceFullSize('${ev.id}')">
+                            <p class="evidence-caption">${escapeHtml(ev.caption)}</p>
+                            <small class="evidence-date">${new Date(ev.createdAt).toLocaleString()}</small>
+                            <button class="btn-delete-evidence" onclick="deleteEvidence('${ev.id}', '${targetId}')">
+                                Delete
+                            </button>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `).join('');
+}
+
+// Format stage name for display
+function formatStageName(stage) {
+    return stage.split('_').map(word => 
+        word.charAt(0).toUpperCase() + word.slice(1)
+    ).join(' ');
+}
+
+// View evidence full size (simple modal/new tab approach)
+window.viewEvidenceFullSize = function(evidenceId) {
+    // Find evidence in state
+    for (const targetId in state.evidence) {
+        const ev = state.evidence[targetId].find(e => e.id === evidenceId);
+        if (ev) {
+            // Open in new tab
+            const win = window.open();
+            win.document.write(`
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>${ev.caption}</title>
+                    <style>
+                        body { margin: 0; padding: 20px; background: #1a1a1a; color: white; font-family: sans-serif; }
+                        img { max-width: 100%; height: auto; display: block; margin: 20px auto; }
+                        h2 { text-align: center; }
+                    </style>
+                </head>
+                <body>
+                    <h2>${ev.caption}</h2>
+                    <img src="${ev.dataUrl}" alt="${ev.caption}">
+                    <p style="text-align: center;">Stage: ${formatStageName(ev.stage)}</p>
+                    <p style="text-align: center;">Uploaded: ${new Date(ev.createdAt).toLocaleString()}</p>
+                </body>
+                </html>
+            `);
+            return;
+        }
+    }
+};
+
+// Delete evidence
+window.deleteEvidence = async function(evidenceId, targetId) {
+    if (!confirm('Delete this evidence? This cannot be undone.')) return;
+    
+    try {
+        const res = await fetch(`${API_BASE}/evidence/${evidenceId}`, {
+            method: 'DELETE'
+        });
+        
+        if (!res.ok) throw new Error('Failed to delete evidence');
+        
+        // Remove from local state
+        if (state.evidence[targetId]) {
+            state.evidence[targetId] = state.evidence[targetId]
+                .filter(ev => ev.id !== evidenceId);
+        }
+        
+        // Refresh display
+        displayEvidence(targetId);
+        showStatus('Evidence deleted');
+        
+    } catch (error) {
+        showStatus(`Error: ${error.message}`, 'error');
+    }
+};
 
 // Initialize

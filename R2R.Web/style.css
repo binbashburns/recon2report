@@ -110,6 +110,15 @@ nav a:hover {
     display: block;
 }
 
+/* Host tabs within hosts screen */
+.host-tab {
+    display: none;
+}
+
+.host-tab.active {
+    display: block;
+}
+
 h2 {
     color: var(--text);
     margin-bottom: 1.5rem;
@@ -500,4 +509,121 @@ input[readonly] {
     background: var(--background);
     color: var(--text-light);
     cursor: not-allowed;
+}
+
+/* Evidence Management */
+.evidence-upload-section {
+    background: white;
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.evidence-upload-section h3 {
+    margin-top: 0;
+    margin-bottom: 1rem;
+    color: var(--primary);
+}
+
+.evidence-display-section {
+    margin-top: 2rem;
+}
+
+.evidence-display-section h3 {
+    color: var(--text);
+    margin-bottom: 1rem;
+}
+
+.evidence-container {
+    margin-top: 1rem;
+}
+
+.evidence-stage-group {
+    margin-bottom: 2.5rem;
+    background: white;
+    border-radius: 8px;
+    padding: 1.5rem;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.evidence-stage-heading {
+    color: var(--primary);
+    font-size: 1.2rem;
+    margin-top: 0;
+    margin-bottom: 1.5rem;
+    border-bottom: 2px solid var(--primary);
+    padding-bottom: 0.5rem;
+}
+
+.evidence-thumbnails {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 1.5rem;
+}
+
+.evidence-item {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem;
+    background: white;
+    display: flex;
+    flex-direction: column;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.evidence-item:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+.evidence-thumb {
+    width: 100%;
+    height: 200px;
+    object-fit: cover;
+    border-radius: 6px;
+    cursor: pointer;
+    margin-bottom: 0.75rem;
+    border: 1px solid var(--border);
+    transition: opacity 0.2s;
+}
+
+.evidence-thumb:hover {
+    opacity: 0.9;
+}
+
+.evidence-caption {
+    margin: 0 0 0.5rem 0;
+    font-size: 0.95rem;
+    color: var(--text);
+    line-height: 1.4;
+    flex-grow: 1;
+}
+
+.evidence-date {
+    color: var(--text-light);
+    font-size: 0.85rem;
+    margin-bottom: 0.75rem;
+    display: block;
+}
+
+.btn-delete-evidence {
+    width: 100%;
+    padding: 0.5rem;
+    background: var(--error);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: background 0.2s;
+}
+
+.btn-delete-evidence:hover {
+    background: #c0392b;
+}
+
+#evidence-preview {
+    color: var(--text-light);
+    font-size: 0.9rem;
 }
